@@ -3,10 +3,16 @@ from discord import app_commands
 
 import os
 
+from discord.ext import tasks
+import datetime
+import html
+from zoneinfo import ZoneInfo
+
 TOKEN = os.getenv("TOKEN")
 
 CATEGORIA_ID = 1514756129513799724
 CARGO_EQUIPE_ID = 1514762487831072819
+BACKUP_CHANNEL_ID = 1514811262813339648
 
 TOPICOS = [
     "📋 Painel",
@@ -121,12 +127,51 @@ class CriarMesaView(discord.ui.View):
     )
     async def criar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await criar_mesa(interaction)
+def limpar(texto):
+    return html.escape(texto or "")
+
+@tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=ZoneInfo("America/Sao_Paulo")))
+async def backup_diario():
+    for guild in bot.guilds:
+        data = datetime.datetime.now().strftime("%d-%m-%Y")
+        nome_arquivo = f"backup-{guild.name}-{data}.html".replace(" ", "-")
+
+        conteudo = f"<html><body><h1>Backup {guild.name} - {data}</h1>"
+
+        for canal in guild.text_channels:
+            conteudo += f"<h2>#{limpar(canal.name)}</h2>"
+
+            try:
+                async for msg in canal.history(limit=500, oldest_first=True):
+                    conteudo += f"<p><b>{limpar(str(msg.author))}</b>: {limpar(msg.content)}</p>"
+            except:
+                pass
+
+        conteudo += "</body></html>"
+
+        with open(nome_arquivo, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+
+        canal_backup = bot.get_channel(BACKUP_CHANNEL_ID)
+
+        if canal_backup:
+            await canal_backup.send(
+                content=f"📦 Backup diário de {guild.name}",
+                file=discord.File(nome_arquivo)
+            )
+
+        os.remove(nome_arquivo)
 
 @bot.event
 async def on_ready():
     await tree.sync()
+
+    if not backup_diario.is_running():
+        backup_diario.start()
+
     print(f"Bot online como {bot.user}")
     print("Comandos sincronizados!")
+    print("Backup diário ativado!")
 
 @tree.command(name="painel", description="Painel de criação de mesas")
 async def painel(interaction: discord.Interaction):
