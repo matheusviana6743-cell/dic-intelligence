@@ -7,6 +7,8 @@ from discord.ext import tasks
 import datetime
 import html
 from zoneinfo import ZoneInfo
+import json
+import asyncio
 
 TOKEN = os.getenv("TOKEN")
 
@@ -14,6 +16,8 @@ CATEGORIA_ID = 1514756129513799724
 CARGO_EQUIPE_ID = 1514762487831072819
 BACKUP_CHANNEL_ID = 1514811262813339648
 PROCURADOS_CHANNEL_ID = 1515040708971597894
+HISTORICO_PROCURADOS_ID = 1515052449776533745
+LOGS_CHANNEL_ID = 1515052409532055662
 
 TOPICOS = [
     "📋 Painel",
@@ -365,6 +369,215 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
 
     await interaction.response.send_message(
         "✅ Procurado cadastrado com sucesso.",
+        ephemeral=True
+    )
+ARQUIVO_PROCURADOS = "procurados.json"
+
+def carregar_procurados():
+    if not os.path.exists(ARQUIVO_PROCURADOS):
+        return []
+    with open(ARQUIVO_PROCURADOS, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def salvar_procurados(lista):
+    with open(ARQUIVO_PROCURADOS, "w", encoding="utf-8") as f:
+        json.dump(lista, f, ensure_ascii=False, indent=4)
+
+class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
+    nome = discord.ui.TextInput(label="Nome do procurado", required=True)
+    rg = discord.ui.TextInput(label="RG", required=True)
+    ultimo = discord.ui.TextInput(label="Último avistamento", required=True)
+    crimes = discord.ui.TextInput(label="Crimes imputados", style=discord.TextStyle.paragraph, required=True)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        categoria = guild.get_channel(CATEGORIA_ID)
+        cargo = guild.get_role(CARGO_EQUIPE_ID)
+
+        nome_canal = f"🚨-procurado-{self.nome.value}".replace(" ", "-").lower()
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
+            cargo: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
+        }
+
+        canal = await guild.create_text_channel(
+            name=nome_canal,
+            category=categoria,
+            overwrites=overwrites
+        )
+
+        await canal.send(
+            f"🚨 **Cadastro de Procurado**\n\n"
+            f"👤 Nome: **{self.nome.value}**\n"
+            f"🆔 RG: **{self.rg.value}**\n\n"
+            f"📸 Envie até **2 fotos** neste canal.\n"
+            f"Depois clique em **✅ Finalizar Cadastro**.",
+            view=FinalizarProcuradoView(
+                self.nome.value,
+                self.rg.value,
+                self.ultimo.value,
+                self.crimes.value,
+                interaction.user.id
+            )
+        )
+
+        await interaction.response.send_message(
+            f"✅ Canal criado: {canal.mention}",
+            ephemeral=True
+        )
+
+class FinalizarProcuradoView(discord.ui.View):
+    def __init__(self, nome, rg, ultimo, crimes, autor_id):
+        super().__init__(timeout=None)
+        self.nome = nome
+        self.rg = rg
+        self.ultimo = ultimo
+        self.crimes = crimes
+        self.autor_id = autor_id
+
+    @discord.ui.button(label="Finalizar Cadastro", emoji="✅", style=discord.ButtonStyle.success)
+    async def finalizar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        anexos = []
+
+        async for msg in interaction.channel.history(limit=50, oldest_first=True):
+            if msg.author.bot:
+                continue
+            for anexo in msg.attachments:
+                if len(anexos) < 2:
+                    anexos.append(await anexo.to_file())
+
+        canal_procurados = bot.get_channel(PROCURADOS_CHANNEL_ID)
+        canal_logs = bot.get_channel(LOGS_CHANNEL_ID)
+
+        texto = f"""
+🚨 **MANDADO DE PRISÃO E PROCURAÇÃO INVESTIGATIVA** 🚨
+
+A Polícia DENARC de Capital Morada, por intermédio da **Divisão de Investigações Criminais (DIC)**, informa que o indivíduo abaixo encontra-se oficialmente procurado pelas autoridades competentes.
+
+As investigações apontam seu envolvimento em atividades criminosas, havendo mandado ativo para sua localização, abordagem e condução para os procedimentos cabíveis.
+
+📍 **ÚLTIMO AVISTAMENTO:** {self.ultimo}
+
+⚠️ **CRIMES IMPUTADOS:**
+{self.crimes}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+🆔 **IDENTIFICAÇÃO DO PROCURADO**
+
+👤 **Nome:** {self.nome}
+🆔 **RG:** {self.rg}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+📞 Qualquer informação sobre o paradeiro deste indivíduo deverá ser repassada imediatamente a um agente da DENARC ou da DIC.
+
+🔒 O sigilo do denunciante será integralmente preservado.
+
+🔹 Polícia DENARC de Capital Morada
+🔹 Divisão de Investigações Criminais (DIC)
+"""
+
+        mensagem = await canal_procurados.send(content=texto, files=anexos)
+
+        lista = carregar_procurados()
+        lista.append({
+            "nome": self.nome,
+            "rg": self.rg,
+            "ultimo": self.ultimo,
+            "crimes": self.crimes,
+            "autor": interaction.user.name,
+            "mensagem_id": mensagem.id
+        })
+        salvar_procurados(lista)
+
+        if canal_logs:
+            await canal_logs.send(
+                f"👮 **Novo procurado cadastrado**\n"
+                f"👤 Nome: {self.nome}\n"
+                f"🆔 RG: {self.rg}\n"
+                f"📌 Cadastrado por: {interaction.user.mention}"
+            )
+
+        await interaction.response.send_message("✅ Procurado publicado com sucesso.", ephemeral=True)
+
+        await asyncio.sleep(10)
+        await interaction.channel.delete()
+
+class PainelProcuradosView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Novo Procurado", emoji="➕", style=discord.ButtonStyle.danger)
+    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ProcuradoModal())
+
+@tree.command(name="painelprocurados", description="Criar painel de procurados")
+async def painelprocurados(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🚨 Sistema de Procurados - DIC",
+        description="Clique no botão abaixo para cadastrar um novo procurado.",
+        color=0x8B0000
+    )
+
+    await interaction.response.send_message(embed=embed, view=PainelProcuradosView())
+
+@tree.command(name="listarprocurados", description="Lista os procurados cadastrados")
+async def listarprocurados(interaction: discord.Interaction):
+    lista = carregar_procurados()
+
+    if not lista:
+        await interaction.response.send_message("📂 Nenhum procurado cadastrado.", ephemeral=True)
+        return
+
+    texto = "🔍 **Lista de Procurados**\n\n"
+
+    for p in lista:
+        texto += f"👤 **{p['nome']}** | RG: `{p['rg']}`\n"
+
+    await interaction.response.send_message(texto, ephemeral=True)
+
+@tree.command(name="retirarprocurado", description="Retira um procurado pelo RG")
+@app_commands.describe(rg="RG do procurado")
+async def retirarprocurado(interaction: discord.Interaction, rg: str):
+    lista = carregar_procurados()
+    procurado = None
+
+    for p in lista:
+        if p["rg"] == rg:
+            procurado = p
+            break
+
+    if procurado is None:
+        await interaction.response.send_message("❌ Procurado não encontrado.", ephemeral=True)
+        return
+
+    lista.remove(procurado)
+    salvar_procurados(lista)
+
+    historico = bot.get_channel(HISTORICO_PROCURADOS_ID)
+    logs = bot.get_channel(LOGS_CHANNEL_ID)
+
+    if historico:
+        await historico.send(
+            f"📂 **Procurado removido do sistema**\n\n"
+            f"👤 Nome: {procurado['nome']}\n"
+            f"🆔 RG: {procurado['rg']}\n"
+            f"⚠️ Crimes: {procurado['crimes']}"
+        )
+
+    if logs:
+        await logs.send(
+            f"❌ **Procurado retirado**\n"
+            f"👤 Nome: {procurado['nome']}\n"
+            f"🆔 RG: {procurado['rg']}\n"
+            f"👮 Retirado por: {interaction.user.mention}"
+        )
+
+    await interaction.response.send_message(
+        f"✅ Procurado **{procurado['nome']}** removido com sucesso.",
         ephemeral=True
     )
 bot.run(TOKEN)
