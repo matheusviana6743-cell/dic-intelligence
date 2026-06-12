@@ -306,5 +306,9 @@ async def painel(interaction: discord.Interaction):
         embed=embed,
         view=CriarMesaView()
     )
+@tree.command(name="testebackup", description="Executar backup agora")
+async def testebackup(interaction: discord.Interaction):
+    await interaction.response.send_message("📦 Executando backup...", ephemeral=True)
+    await backup_diario()
 
 bot.run(TOKEN)
