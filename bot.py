@@ -12,7 +12,10 @@ from zoneinfo import ZoneInfo
 
 TOKEN = os.getenv("TOKEN")
 
-# IDs principais
+# =========================
+# IDS
+# =========================
+
 CARGO_EQUIPE_ID = 1514762487831072819
 
 BACKUP_CHANNEL_ID = 1514811262813339648
@@ -21,8 +24,9 @@ PROCURADOS_CHANNEL_ID = 1515040708971597894
 HISTORICO_PROCURADOS_ID = 1515052449776533745
 LOGS_CHANNEL_ID = 1515052409532055662
 
-CATEGORIA_MESAS_ABERTAS_ID = 1515074655243862079
-CATEGORIA_MESAS_FECHADAS_ID = 1515074710235517110
+# NOVAS CATEGORIAS
+CATEGORIA_MESAS_ABERTAS_ID = 1515079970722938920
+CATEGORIA_MESAS_FECHADAS_ID = 1515052497025372160
 
 ARQUIVO_PROCURADOS = "procurados.json"
 
@@ -50,6 +54,12 @@ intents.message_content = True
 bot = discord.Client(intents=intents)
 tree = app_commands.CommandTree(bot)
 
+views_adicionadas = False
+
+
+# =========================
+# FUNÇÕES BÁSICAS
+# =========================
 
 def limpar(texto):
     return html.escape(str(texto or ""))
@@ -96,6 +106,10 @@ async def enviar_log(titulo, descricao):
         await canal.send(embed=embed)
 
 
+# =========================
+# SISTEMA DE MESAS
+# =========================
+
 class FecharMesaView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -109,33 +123,57 @@ class FecharMesaView(discord.ui.View):
     async def fechar_mesa(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
-        canal = interaction.channel
-        guild = interaction.guild
-        categoria_fechadas = guild.get_channel(CATEGORIA_MESAS_FECHADAS_ID)
+        try:
+            canal = interaction.channel
+            guild = interaction.guild
+            categoria_fechadas = guild.get_channel(CATEGORIA_MESAS_FECHADAS_ID)
 
-        novo_nome = canal.name
+            if categoria_fechadas is None:
+                await interaction.followup.send(
+                    "❌ Categoria de mesas fechadas não encontrada.",
+                    ephemeral=True
+                )
+                await enviar_log(
+                    "Erro ao Fechar Mesa",
+                    f"❌ Categoria não encontrada.\nID: `{CATEGORIA_MESAS_FECHADAS_ID}`"
+                )
+                return
 
-        if not novo_nome.startswith("🔒-"):
-            novo_nome = f"🔒-{novo_nome}"
+            novo_nome = canal.name
 
-        await canal.edit(
-            name=novo_nome,
-            category=categoria_fechadas
-        )
+            if not novo_nome.startswith("🔒-"):
+                novo_nome = f"🔒-{novo_nome}"
 
-        await canal.send("🔒 **Mesa encerrada e arquivada com sucesso.**")
+            await canal.edit(
+                name=novo_nome,
+                category=categoria_fechadas
+            )
 
-        await enviar_log(
-            "Mesa Fechada",
-            f"👤 Fechada por: {interaction.user.mention}\n"
-            f"📁 Canal: {canal.mention}\n"
-            f"📂 Movida para: <#{CATEGORIA_MESAS_FECHADAS_ID}>"
-        )
+            await canal.send("🔒 **Mesa encerrada e movida para a categoria de mesas fechadas.**")
 
-        await interaction.followup.send(
-            "✅ Mesa fechada e movida para a categoria de mesas fechadas.",
-            ephemeral=True
-        )
+            await enviar_log(
+                "Mesa Fechada",
+                f"👤 Fechada por: {interaction.user.mention}\n"
+                f"📁 Canal: {canal.mention}\n"
+                f"📂 Movida para categoria: `{CATEGORIA_MESAS_FECHADAS_ID}`\n"
+                f"⚠️ Nenhuma mensagem ou canal foi apagado."
+            )
+
+            await interaction.followup.send(
+                "✅ Mesa fechada e movida para a categoria de mesas fechadas.",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao fechar mesa: `{e}`",
+                ephemeral=True
+            )
+            await enviar_log(
+                "Erro ao Fechar Mesa",
+                f"👤 Usuário: {interaction.user.mention}\n"
+                f"⚠️ Erro: `{e}`"
+            )
 
 
 class CriarMesaModal(discord.ui.Modal, title="Criar Mesa Investigativa"):
@@ -167,77 +205,122 @@ class CriarMesaView(discord.ui.View):
 async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
     await interaction.response.defer(ephemeral=True)
 
-    guild = interaction.guild
+    try:
+        guild = interaction.guild
 
-    categoria_abertas = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
-    cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
+        categoria_abertas = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
+        cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
 
-    nome_usuario = nome_seguro(interaction.user.display_name)
-    nome_investigacao = nome_seguro(nome_familia)
+        if categoria_abertas is None:
+            await interaction.followup.send(
+                "❌ Erro: categoria de mesas abertas não encontrada.",
+                ephemeral=True
+            )
+            await enviar_log(
+                "Erro ao Criar Mesa",
+                f"❌ Categoria de mesas abertas não encontrada.\n"
+                f"ID usado: `{CATEGORIA_MESAS_ABERTAS_ID}`"
+            )
+            return
 
-    nome_canal = f"🕵️‍♂️-{nome_usuario}-┃-{nome_investigacao}"
-    canal_existente = discord.utils.get(guild.text_channels, name=nome_canal)
+        if cargo_equipe is None:
+            await interaction.followup.send(
+                "❌ Erro: cargo da equipe não encontrado.",
+                ephemeral=True
+            )
+            await enviar_log(
+                "Erro ao Criar Mesa",
+                f"❌ Cargo da equipe não encontrado.\n"
+                f"ID usado: `{CARGO_EQUIPE_ID}`"
+            )
+            return
 
-    if canal_existente:
+        nome_usuario = nome_seguro(interaction.user.display_name)
+        nome_investigacao = nome_seguro(nome_familia)
+
+        nome_canal = f"🕵️‍♂️-{nome_usuario}-┃-{nome_investigacao}"
+
+        canal_existente = discord.utils.get(
+            guild.text_channels,
+            name=nome_canal
+        )
+
+        if canal_existente:
+            await interaction.followup.send(
+                f"⚠️ Essa mesa já existe: {canal_existente.mention}",
+                ephemeral=True
+            )
+            return
+
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                attach_files=True,
+                read_message_history=True
+            ),
+            cargo_equipe: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                attach_files=True,
+                read_message_history=True
+            )
+        }
+
+        canal = await guild.create_text_channel(
+            name=nome_canal,
+            category=categoria_abertas,
+            overwrites=overwrites
+        )
+
+        await canal.send(
+            f"📂 **Mesa criada para:** {interaction.user.mention}\n"
+            f"🕵️‍♂️ **Investigação/Família:** `{nome_familia}`\n\n"
+            f"Utilize os tópicos abaixo para enviar fotos, documentos e informações.",
+            view=FecharMesaView()
+        )
+
+        for topico in TOPICOS:
+            thread = await canal.create_thread(
+                name=topico,
+                type=discord.ChannelType.public_thread
+            )
+
+            await thread.send(
+                f"📌 **{topico}**\n\n"
+                f"Envie aqui fotos, documentos, textos e informações deste tópico."
+            )
+
+        await enviar_log(
+            "Mesa Criada",
+            f"👤 Usuário: {interaction.user.mention}\n"
+            f"🕵️‍♂️ Investigação/Família: `{nome_familia}`\n"
+            f"📂 Mesa: {canal.mention}\n"
+            f"📁 Categoria: `{CATEGORIA_MESAS_ABERTAS_ID}`"
+        )
+
         await interaction.followup.send(
-            f"⚠️ Essa mesa já existe: {canal_existente.mention}",
+            f"✅ Mesa criada com sucesso: {canal.mention}",
             ephemeral=True
         )
-        return
 
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        interaction.user: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            attach_files=True,
-            read_message_history=True
-        ),
-        cargo_equipe: discord.PermissionOverwrite(
-            view_channel=True,
-            send_messages=True,
-            attach_files=True,
-            read_message_history=True
-        )
-    }
-
-    canal = await guild.create_text_channel(
-        name=nome_canal,
-        category=categoria_abertas,
-        overwrites=overwrites
-    )
-
-    await canal.send(
-        f"📂 **Mesa criada para:** {interaction.user.mention}\n"
-        f"🕵️‍♂️ **Investigação/Família:** `{nome_familia}`\n\n"
-        f"Utilize os tópicos abaixo para enviar fotos, documentos e informações.",
-        view=FecharMesaView()
-    )
-
-    for topico in TOPICOS:
-        thread = await canal.create_thread(
-            name=topico,
-            type=discord.ChannelType.public_thread
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao criar mesa: `{e}`",
+            ephemeral=True
         )
 
-        await thread.send(
-            f"📌 **{topico}**\n\n"
-            f"Envie aqui fotos, documentos, textos e informações deste tópico."
+        await enviar_log(
+            "Erro ao Criar Mesa",
+            f"👤 Usuário: {interaction.user.mention}\n"
+            f"⚠️ Erro: `{e}`"
         )
 
-    await enviar_log(
-        "Mesa Criada",
-        f"👤 Usuário: {interaction.user.mention}\n"
-        f"🕵️‍♂️ Investigação/Família: `{nome_familia}`\n"
-        f"📂 Mesa: {canal.mention}\n"
-        f"📁 Categoria: <#{CATEGORIA_MESAS_ABERTAS_ID}>"
-    )
 
-    await interaction.followup.send(
-        f"✅ Mesa criada com sucesso: {canal.mention}",
-        ephemeral=True
-    )
-
+# =========================
+# BACKUP
+# =========================
 
 async def executar_backup(manual=False, usuario=None):
     for guild in bot.guilds:
@@ -297,9 +380,7 @@ async def executar_backup(manual=False, usuario=None):
         <h3>Data: {data}</h3>
         """
 
-        canais = list(guild.text_channels)
-
-        for canal in canais:
+        for canal in guild.text_channels:
             conteudo += f"<h2 class='canal'># {limpar(canal.name)}</h2>"
 
             try:
@@ -405,6 +486,10 @@ async def backup_diario():
     await executar_backup(manual=False)
 
 
+# =========================
+# SISTEMA DE PROCURADOS
+# =========================
+
 class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
     nome = discord.ui.TextInput(label="Nome do procurado", required=True)
     rg = discord.ui.TextInput(label="RG", required=True)
@@ -418,61 +503,76 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
-        guild = interaction.guild
-        categoria = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
-        cargo = guild.get_role(CARGO_EQUIPE_ID)
+        try:
+            guild = interaction.guild
+            categoria = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
+            cargo = guild.get_role(CARGO_EQUIPE_ID)
 
-        nome_canal = f"🚨-procurado-{nome_seguro(self.nome.value)}"
+            nome_canal = f"🚨-procurado-{nome_seguro(self.nome.value)}"
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            interaction.user: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                attach_files=True,
-                read_message_history=True
-            ),
-            cargo: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                attach_files=True,
-                read_message_history=True
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                interaction.user: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    attach_files=True,
+                    read_message_history=True
+                ),
+                cargo: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    attach_files=True,
+                    read_message_history=True
+                )
+            }
+
+            canal = await guild.create_text_channel(
+                name=nome_canal,
+                category=categoria,
+                overwrites=overwrites
             )
-        }
 
-        canal = await guild.create_text_channel(
-            name=nome_canal,
-            category=categoria,
-            overwrites=overwrites
-        )
-
-        await canal.send(
-            f"🚨 **Cadastro de Procurado**\n\n"
-            f"👤 Nome: **{self.nome.value}**\n"
-            f"🆔 RG: **{self.rg.value}**\n\n"
-            f"📸 Envie até **2 fotos** neste canal.\n"
-            f"Depois clique em **✅ Finalizar Cadastro**.",
-            view=FinalizarProcuradoView(
-                self.nome.value,
-                self.rg.value,
-                self.ultimo.value,
-                self.crimes.value,
-                interaction.user.id
+            await canal.send(
+                f"🚨 **Cadastro de Procurado**\n\n"
+                f"👤 Nome: **{self.nome.value}**\n"
+                f"🆔 RG: **{self.rg.value}**\n\n"
+                f"📸 Envie até **2 fotos** neste canal.\n"
+                f"Depois clique em **✅ Finalizar Cadastro**.\n\n"
+                f"⚠️ Este canal **não será apagado**.",
+                view=FinalizarProcuradoView(
+                    self.nome.value,
+                    self.rg.value,
+                    self.ultimo.value,
+                    self.crimes.value,
+                    interaction.user.id
+                )
             )
-        )
 
-        await enviar_log(
-            "Ticket de Procurado Criado",
-            f"👤 Responsável: {interaction.user.mention}\n"
-            f"🚨 Procurado: `{self.nome.value}`\n"
-            f"🆔 RG: `{self.rg.value}`\n"
-            f"📂 Canal temporário: {canal.mention}"
-        )
+            await enviar_log(
+                "Ticket de Procurado Criado",
+                f"👤 Responsável: {interaction.user.mention}\n"
+                f"🚨 Procurado: `{self.nome.value}`\n"
+                f"🆔 RG: `{self.rg.value}`\n"
+                f"📂 Canal temporário: {canal.mention}\n"
+                f"⚠️ Nenhum canal será apagado."
+            )
 
-        await interaction.followup.send(
-            f"✅ Canal criado para anexar fotos: {canal.mention}",
-            ephemeral=True
-        )
+            await interaction.followup.send(
+                f"✅ Canal criado para anexar fotos: {canal.mention}",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao criar ticket de procurado: `{e}`",
+                ephemeral=True
+            )
+
+            await enviar_log(
+                "Erro ao Criar Ticket de Procurado",
+                f"👤 Usuário: {interaction.user.mention}\n"
+                f"⚠️ Erro: `{e}`"
+            )
 
 
 class FinalizarProcuradoView(discord.ui.View):
@@ -492,19 +592,20 @@ class FinalizarProcuradoView(discord.ui.View):
     async def finalizar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
 
-        anexos = []
+        try:
+            anexos = []
 
-        async for msg in interaction.channel.history(limit=50, oldest_first=True):
-            if msg.author.bot:
-                continue
+            async for msg in interaction.channel.history(limit=50, oldest_first=True):
+                if msg.author.bot:
+                    continue
 
-            for anexo in msg.attachments:
-                if len(anexos) < 2:
-                    anexos.append(await anexo.to_file())
+                for anexo in msg.attachments:
+                    if len(anexos) < 2:
+                        anexos.append(await anexo.to_file())
 
-        canal_procurados = bot.get_channel(PROCURADOS_CHANNEL_ID)
+            canal_procurados = bot.get_channel(PROCURADOS_CHANNEL_ID)
 
-        texto = f"""
+            texto = f"""
 🚨 **MANDADO DE PRISÃO E PROCURAÇÃO INVESTIGATIVA** 🚨
 
 A Polícia DENARC de Capital Morada, por intermédio da **Divisão de Investigações Criminais (DIC)**, informa que o indivíduo abaixo encontra-se oficialmente procurado pelas autoridades competentes.
@@ -533,41 +634,56 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
 🔹 Divisão de Investigações Criminais (DIC)
 """
 
-        mensagem = await canal_procurados.send(content=texto, files=anexos)
+            mensagem = await canal_procurados.send(content=texto, files=anexos)
 
-        lista = carregar_procurados()
-        lista.append({
-            "nome": self.nome,
-            "rg": self.rg,
-            "ultimo": self.ultimo,
-            "crimes": self.crimes,
-            "autor": interaction.user.name,
-            "autor_id": interaction.user.id,
-            "mensagem_id": mensagem.id,
-            "canal_id": PROCURADOS_CHANNEL_ID
-        })
-        salvar_procurados(lista)
+            lista = carregar_procurados()
+            lista.append({
+                "nome": self.nome,
+                "rg": self.rg,
+                "ultimo": self.ultimo,
+                "crimes": self.crimes,
+                "autor": interaction.user.name,
+                "autor_id": interaction.user.id,
+                "mensagem_id": mensagem.id,
+                "canal_id": PROCURADOS_CHANNEL_ID,
+                "status": "ativo"
+            })
+            salvar_procurados(lista)
 
-        await enviar_log(
-            "Procurado Cadastrado",
-            f"👤 Nome: `{self.nome}`\n"
-            f"🆔 RG: `{self.rg}`\n"
-            f"👮 Responsável: {interaction.user.mention}\n"
-            f"📸 Fotos anexadas: `{len(anexos)}`\n"
-            f"📌 Mensagem: {mensagem.jump_url}"
-        )
+            await interaction.channel.edit(name=f"✅-{interaction.channel.name}")
 
-        await interaction.followup.send(
-            "✅ Procurado publicado com sucesso. O canal será apagado em 10 segundos.",
-            ephemeral=True
-        )
+            await interaction.channel.send(
+                "✅ **Cadastro finalizado.**\n"
+                "📌 O canal foi mantido salvo para histórico.\n"
+                "⚠️ Nada foi apagado."
+            )
 
-        await asyncio.sleep(10)
+            await enviar_log(
+                "Procurado Cadastrado",
+                f"👤 Nome: `{self.nome}`\n"
+                f"🆔 RG: `{self.rg}`\n"
+                f"👮 Responsável: {interaction.user.mention}\n"
+                f"📸 Fotos anexadas: `{len(anexos)}`\n"
+                f"📌 Mensagem: {mensagem.jump_url}\n"
+                f"⚠️ Nada foi apagado."
+            )
 
-        try:
-            await interaction.channel.delete()
-        except Exception:
-            pass
+            await interaction.followup.send(
+                "✅ Procurado publicado com sucesso. O canal foi mantido salvo.",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao finalizar procurado: `{e}`",
+                ephemeral=True
+            )
+
+            await enviar_log(
+                "Erro ao Finalizar Procurado",
+                f"👤 Usuário: {interaction.user.mention}\n"
+                f"⚠️ Erro: `{e}`"
+            )
 
     @discord.ui.button(
         label="Cancelar Cadastro",
@@ -575,23 +691,34 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
         style=discord.ButtonStyle.danger
     )
     async def cancelar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(
-            "🗑️ Cadastro cancelado. O canal será apagado em 5 segundos.",
-            ephemeral=True
-        )
-
-        await enviar_log(
-            "Cadastro de Procurado Cancelado",
-            f"👤 Cancelado por: {interaction.user.mention}\n"
-            f"📂 Canal: {interaction.channel.mention}"
-        )
-
-        await asyncio.sleep(5)
+        await interaction.response.defer(ephemeral=True)
 
         try:
-            await interaction.channel.delete()
-        except Exception:
-            pass
+            await interaction.channel.edit(name=f"❌-{interaction.channel.name}")
+
+            await interaction.channel.send(
+                "🗑️ **Cadastro cancelado.**\n"
+                "📌 O canal foi mantido salvo para histórico.\n"
+                "⚠️ Nada foi apagado."
+            )
+
+            await enviar_log(
+                "Cadastro de Procurado Cancelado",
+                f"👤 Cancelado por: {interaction.user.mention}\n"
+                f"📂 Canal mantido: {interaction.channel.mention}\n"
+                f"⚠️ Nada foi apagado."
+            )
+
+            await interaction.followup.send(
+                "✅ Cadastro cancelado. O canal foi mantido salvo.",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao cancelar cadastro: `{e}`",
+                ephemeral=True
+            )
 
 
 class PainelProcuradosView(discord.ui.View):
@@ -623,13 +750,13 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
         procurado = None
 
         for p in lista:
-            if str(p["rg"]) == str(self.rg.value):
+            if str(p["rg"]) == str(self.rg.value) and p.get("status", "ativo") == "ativo":
                 procurado = p
                 break
 
         if procurado is None:
             await interaction.followup.send(
-                "❌ Procurado não encontrado.",
+                "❌ Procurado não encontrado ou já retirado.",
                 ephemeral=True
             )
             return
@@ -638,11 +765,26 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
 
         try:
             mensagem = await canal_procurados.fetch_message(procurado["mensagem_id"])
-            await mensagem.delete()
+
+            novo_texto = (
+                "❌ **PROCURADO RETIRADO DO SISTEMA** ❌\n\n"
+                f"👤 **Nome:** {procurado['nome']}\n"
+                f"🆔 **RG:** {procurado['rg']}\n\n"
+                f"📌 **Motivo da retirada:**\n{self.motivo.value}\n\n"
+                f"👮 **Retirado por:** {interaction.user.mention}\n\n"
+                "⚠️ Esta publicação foi mantida para histórico. Nada foi apagado."
+            )
+
+            await mensagem.edit(content=novo_texto)
+
         except Exception:
             pass
 
-        lista.remove(procurado)
+        procurado["status"] = "retirado"
+        procurado["motivo_retirada"] = self.motivo.value
+        procurado["retirado_por"] = interaction.user.name
+        procurado["retirado_por_id"] = interaction.user.id
+
         salvar_procurados(lista)
 
         historico = bot.get_channel(HISTORICO_PROCURADOS_ID)
@@ -654,7 +796,8 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
                 f"🆔 RG: {procurado['rg']}\n"
                 f"⚠️ Crimes: {procurado['crimes']}\n\n"
                 f"📌 **Motivo:**\n{self.motivo.value}\n\n"
-                f"👮 Removido por: {interaction.user.mention}"
+                f"👮 Removido por: {interaction.user.mention}\n\n"
+                f"⚠️ O post original foi mantido e marcado como retirado."
             )
 
         await enviar_log(
@@ -663,24 +806,33 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
             f"🆔 RG: `{procurado['rg']}`\n"
             f"📌 Motivo: {self.motivo.value}\n"
             f"👮 Retirado por: {interaction.user.mention}\n"
-            f"🗑️ Post original apagado do canal de procurados."
+            f"⚠️ Post original mantido. Nada foi apagado."
         )
 
         await interaction.followup.send(
-            f"✅ Procurado **{procurado['nome']}** removido com sucesso.",
+            f"✅ Procurado **{procurado['nome']}** marcado como retirado com sucesso.",
             ephemeral=True
         )
 
 
+# =========================
+# EVENTOS
+# =========================
+
 @bot.event
 async def on_ready():
+    global views_adicionadas
+
     await tree.sync()
 
     if not backup_diario.is_running():
         backup_diario.start()
 
-    bot.add_view(CriarMesaView())
-    bot.add_view(PainelProcuradosView())
+    if not views_adicionadas:
+        bot.add_view(CriarMesaView())
+        bot.add_view(PainelProcuradosView())
+        bot.add_view(FecharMesaView())
+        views_adicionadas = True
 
     print(f"Bot online como {bot.user}")
     print("Comandos sincronizados!")
@@ -710,6 +862,10 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     except Exception:
         pass
 
+
+# =========================
+# COMANDOS
+# =========================
 
 @tree.command(name="painel", description="Painel de criação de mesas")
 async def painel(interaction: discord.Interaction):
@@ -769,23 +925,24 @@ async def painelprocurados(interaction: discord.Interaction):
 @tree.command(name="listarprocurados", description="Lista os procurados cadastrados")
 async def listarprocurados(interaction: discord.Interaction):
     lista = carregar_procurados()
+    ativos = [p for p in lista if p.get("status", "ativo") == "ativo"]
 
-    if not lista:
+    if not ativos:
         await interaction.response.send_message(
-            "📂 Nenhum procurado cadastrado.",
+            "📂 Nenhum procurado ativo cadastrado.",
             ephemeral=True
         )
 
         await enviar_log(
             "Listagem de Procurados",
             f"👤 Solicitado por: {interaction.user.mention}\n"
-            f"📂 Resultado: Nenhum procurado cadastrado."
+            f"📂 Resultado: Nenhum procurado ativo cadastrado."
         )
         return
 
-    texto = "🔍 **Lista de Procurados**\n\n"
+    texto = "🔍 **Lista de Procurados Ativos**\n\n"
 
-    for p in lista:
+    for p in ativos:
         texto += f"👤 **{p['nome']}** | RG: `{p['rg']}`\n"
 
     await interaction.response.send_message(texto, ephemeral=True)
@@ -793,7 +950,7 @@ async def listarprocurados(interaction: discord.Interaction):
     await enviar_log(
         "Listagem de Procurados",
         f"👤 Solicitado por: {interaction.user.mention}\n"
-        f"📊 Total listado: `{len(lista)}`"
+        f"📊 Total ativo listado: `{len(ativos)}`"
     )
 
 
