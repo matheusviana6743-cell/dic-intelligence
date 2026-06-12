@@ -13,6 +13,7 @@ TOKEN = os.getenv("TOKEN")
 CATEGORIA_ID = 1514756129513799724
 CARGO_EQUIPE_ID = 1514762487831072819
 BACKUP_CHANNEL_ID = 1514811262813339648
+PROCURADOS_CHANNEL_ID = 1515040708971597894
 
 TOPICOS = [
     "📋 Painel",
@@ -306,9 +307,64 @@ async def painel(interaction: discord.Interaction):
         embed=embed,
         view=CriarMesaView()
     )
-@tree.command(name="testebackup", description="Executar backup agora")
-async def testebackup(interaction: discord.Interaction):
-    await interaction.response.send_message("📦 Executando backup...", ephemeral=True)
-    await backup_diario()
+@tree.command(name="procurado", description="Cadastrar um procurado")
+@app_commands.describe(
+    nome="Nome do procurado",
+    rg="RG do procurado",
+    ultimo_avistamento="Último local visto",
+    crimes="Crimes imputados",
+    foto1="Primeira foto",
+    foto2="Segunda foto opcional"
+)
+async def procurado(
+    interaction: discord.Interaction,
+    nome: str,
+    rg: str,
+    ultimo_avistamento: str,
+    crimes: str,
+    foto1: discord.Attachment,
+    foto2: discord.Attachment = None
+):
+    canal = bot.get_channel(PROCURADOS_CHANNEL_ID)
 
+    texto = f"""
+🚨 **MANDADO DE PRISÃO E PROCURAÇÃO INVESTIGATIVA** 🚨
+
+A Polícia DENARC de Capital Morada, por intermédio da **Divisão de Investigações Criminais (DIC)**, informa que o indivíduo abaixo encontra-se oficialmente procurado pelas autoridades competentes.
+
+As investigações apontam seu envolvimento em atividades criminosas, havendo mandado ativo para sua localização, abordagem e condução para os procedimentos cabíveis.
+
+📍 **ÚLTIMO AVISTAMENTO:** {ultimo_avistamento}
+
+⚠️ **CRIMES IMPUTADOS:**
+{crimes}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+🆔 **IDENTIFICAÇÃO DO PROCURADO**
+
+👤 **Nome:** {nome}  
+🆔 **RG:** {rg}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+📞 Qualquer informação sobre o paradeiro deste indivíduo deverá ser repassada imediatamente a um agente da DENARC ou da DIC.
+
+🔒 O sigilo do denunciante será integralmente preservado.
+
+🔹 Polícia DENARC de Capital Morada  
+🔹 Divisão de Investigações Criminais (DIC)
+"""
+
+    arquivos = [await foto1.to_file()]
+
+    if foto2:
+        arquivos.append(await foto2.to_file())
+
+    await canal.send(content=texto, files=arquivos)
+
+    await interaction.response.send_message(
+        "✅ Procurado cadastrado com sucesso.",
+        ephemeral=True
+    )
 bot.run(TOKEN)
