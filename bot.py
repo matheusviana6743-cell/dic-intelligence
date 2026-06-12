@@ -138,6 +138,7 @@ class FecharMesaView(discord.ui.View):
                     "❌ Categoria de mesas fechadas não encontrada.",
                     ephemeral=True
                 )
+
                 await enviar_log(
                     "Erro ao Fechar Mesa",
                     f"❌ Categoria de mesas fechadas não encontrada.\n"
@@ -147,8 +148,8 @@ class FecharMesaView(discord.ui.View):
 
             novo_nome = canal.name
 
-            if not novo_nome.startswith("fechada-"):
-                novo_nome = f"fechada-{novo_nome}"
+            if not novo_nome.startswith("🔒┃"):
+                novo_nome = f"🔒┃{novo_nome}"
 
             await canal.edit(
                 name=novo_nome,
@@ -175,12 +176,12 @@ class FecharMesaView(discord.ui.View):
                 f"❌ Erro ao fechar mesa: `{e}`",
                 ephemeral=True
             )
+
             await enviar_log(
                 "Erro ao Fechar Mesa",
                 f"👤 Usuário: {interaction.user.mention}\n"
                 f"⚠️ Erro: `{e}`"
             )
-
 
 class CriarMesaModal(discord.ui.Modal, title="Criar Mesa Investigativa"):
     nome_familia = discord.ui.TextInput(
@@ -241,10 +242,13 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
             )
             return
 
-        nome_usuario = nome_seguro(interaction.user.display_name)
-        nome_investigacao = nome_seguro(nome_familia)
+                apelido = interaction.user.display_name
+        familia = nome_familia
 
-        nome_canal = f"mesa-{nome_usuario}-{nome_investigacao}"
+        apelido_formatado = nome_seguro(apelido)
+        familia_formatada = nome_seguro(familia)
+
+        nome_canal = f"🕵️‍♂️┃{apelido_formatado}•{familia_formatada}"
 
         canal_existente = discord.utils.get(
             guild.text_channels,
