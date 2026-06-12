@@ -7,6 +7,8 @@ import json
 import html
 import asyncio
 import datetime
+import re
+import unicodedata
 from zoneinfo import ZoneInfo
 
 
@@ -24,7 +26,7 @@ PROCURADOS_CHANNEL_ID = 1515040708971597894
 HISTORICO_PROCURADOS_ID = 1515052449776533745
 LOGS_CHANNEL_ID = 1515052409532055662
 
-# NOVAS CATEGORIAS
+# Categorias das mesas
 CATEGORIA_MESAS_ABERTAS_ID = 1515079970722938920
 CATEGORIA_MESAS_FECHADAS_ID = 1515052497025372160
 
@@ -67,13 +69,16 @@ def limpar(texto):
 
 def nome_seguro(texto):
     texto = str(texto).lower().strip()
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
     texto = texto.replace(" ", "-")
-    texto = texto.replace("/", "-").replace("\\", "-")
-    texto = texto.replace(":", "").replace("*", "")
-    texto = texto.replace("?", "").replace('"', "")
-    texto = texto.replace("<", "").replace(">", "")
-    texto = texto.replace("|", "")
-    return texto[:80]
+    texto = re.sub(r"[^a-z0-9-]", "", texto)
+    texto = re.sub(r"-+", "-", texto)
+    texto = texto.strip("-")
+
+    if not texto:
+        texto = "sem-nome"
+
+    return texto[:70]
 
 
 def carregar_procurados():
@@ -135,14 +140,15 @@ class FecharMesaView(discord.ui.View):
                 )
                 await enviar_log(
                     "Erro ao Fechar Mesa",
-                    f"❌ Categoria não encontrada.\nID: `{CATEGORIA_MESAS_FECHADAS_ID}`"
+                    f"❌ Categoria de mesas fechadas não encontrada.\n"
+                    f"ID: `{CATEGORIA_MESAS_FECHADAS_ID}`"
                 )
                 return
 
             novo_nome = canal.name
 
-            if not novo_nome.startswith("🔒-"):
-                novo_nome = f"🔒-{novo_nome}"
+            if not novo_nome.startswith("fechada-"):
+                novo_nome = f"fechada-{novo_nome}"
 
             await canal.edit(
                 name=novo_nome,
@@ -156,11 +162,11 @@ class FecharMesaView(discord.ui.View):
                 f"👤 Fechada por: {interaction.user.mention}\n"
                 f"📁 Canal: {canal.mention}\n"
                 f"📂 Movida para categoria: `{CATEGORIA_MESAS_FECHADAS_ID}`\n"
-                f"⚠️ Nenhuma mensagem ou canal foi apagado."
+                f"⚠️ Nenhuma mensagem antiga foi apagada."
             )
 
             await interaction.followup.send(
-                "✅ Mesa fechada e movida para a categoria de mesas fechadas.",
+                "✅ Mesa fechada e movida para a categoria correta.",
                 ephemeral=True
             )
 
@@ -238,7 +244,7 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
         nome_usuario = nome_seguro(interaction.user.display_name)
         nome_investigacao = nome_seguro(nome_familia)
 
-        nome_canal = f"🕵️‍♂️-{nome_usuario}-┃-{nome_investigacao}"
+        nome_canal = f"mesa-{nome_usuario}-{nome_investigacao}"
 
         canal_existente = discord.utils.get(
             guild.text_channels,
@@ -508,7 +514,21 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
             categoria = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
             cargo = guild.get_role(CARGO_EQUIPE_ID)
 
-            nome_canal = f"🚨-procurado-{nome_seguro(self.nome.value)}"
+            if categoria is None:
+                await interaction.followup.send(
+                    "❌ Categoria para canal provisório não encontrada.",
+                    ephemeral=True
+                )
+                return
+
+            if cargo is None:
+                await interaction.followup.send(
+                    "❌ Cargo da equipe não encontrado.",
+                    ephemeral=True
+                )
+                return
+
+            nome_canal = f"procurado-{nome_seguro(self.nome.value)}"
 
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -538,7 +558,7 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
                 f"🆔 RG: **{self.rg.value}**\n\n"
                 f"📸 Envie até **2 fotos** neste canal.\n"
                 f"Depois clique em **✅ Finalizar Cadastro**.\n\n"
-                f"⚠️ Este canal **não será apagado**.",
+                f"⚠️ Este canal é provisório e será apagado após finalizar ou cancelar.",
                 view=FinalizarProcuradoView(
                     self.nome.value,
                     self.rg.value,
@@ -549,27 +569,27 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
             )
 
             await enviar_log(
-                "Ticket de Procurado Criado",
+                "Canal Provisório de Procurado Criado",
                 f"👤 Responsável: {interaction.user.mention}\n"
                 f"🚨 Procurado: `{self.nome.value}`\n"
                 f"🆔 RG: `{self.rg.value}`\n"
-                f"📂 Canal temporário: {canal.mention}\n"
-                f"⚠️ Nenhum canal será apagado."
+                f"📂 Canal provisório: {canal.mention}\n"
+                f"🗑️ Será apagado após finalizar ou cancelar."
             )
 
             await interaction.followup.send(
-                f"✅ Canal criado para anexar fotos: {canal.mention}",
+                f"✅ Canal provisório criado para anexar fotos: {canal.mention}",
                 ephemeral=True
             )
 
         except Exception as e:
             await interaction.followup.send(
-                f"❌ Erro ao criar ticket de procurado: `{e}`",
+                f"❌ Erro ao criar canal provisório: `{e}`",
                 ephemeral=True
             )
 
             await enviar_log(
-                "Erro ao Criar Ticket de Procurado",
+                "Erro ao Criar Canal Provisório",
                 f"👤 Usuário: {interaction.user.mention}\n"
                 f"⚠️ Erro: `{e}`"
             )
@@ -604,6 +624,13 @@ class FinalizarProcuradoView(discord.ui.View):
                         anexos.append(await anexo.to_file())
 
             canal_procurados = bot.get_channel(PROCURADOS_CHANNEL_ID)
+
+            if canal_procurados is None:
+                await interaction.followup.send(
+                    "❌ Canal de procurados não encontrado.",
+                    ephemeral=True
+                )
+                return
 
             texto = f"""
 🚨 **MANDADO DE PRISÃO E PROCURAÇÃO INVESTIGATIVA** 🚨
@@ -650,14 +677,6 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
             })
             salvar_procurados(lista)
 
-            await interaction.channel.edit(name=f"✅-{interaction.channel.name}")
-
-            await interaction.channel.send(
-                "✅ **Cadastro finalizado.**\n"
-                "📌 O canal foi mantido salvo para histórico.\n"
-                "⚠️ Nada foi apagado."
-            )
-
             await enviar_log(
                 "Procurado Cadastrado",
                 f"👤 Nome: `{self.nome}`\n"
@@ -665,13 +684,24 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
                 f"👮 Responsável: {interaction.user.mention}\n"
                 f"📸 Fotos anexadas: `{len(anexos)}`\n"
                 f"📌 Mensagem: {mensagem.jump_url}\n"
-                f"⚠️ Nada foi apagado."
+                f"🗑️ Canal provisório apagado após finalizar."
             )
 
             await interaction.followup.send(
-                "✅ Procurado publicado com sucesso. O canal foi mantido salvo.",
+                "✅ Procurado publicado. O canal provisório será apagado em 10 segundos.",
                 ephemeral=True
             )
+
+            await asyncio.sleep(10)
+
+            try:
+                await interaction.channel.delete()
+            except Exception as e:
+                await enviar_log(
+                    "Erro ao Apagar Canal Provisório",
+                    f"📂 Canal: {interaction.channel.mention}\n"
+                    f"⚠️ Erro: `{e}`"
+                )
 
         except Exception as e:
             await interaction.followup.send(
@@ -694,25 +724,28 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
         await interaction.response.defer(ephemeral=True)
 
         try:
-            await interaction.channel.edit(name=f"❌-{interaction.channel.name}")
-
-            await interaction.channel.send(
-                "🗑️ **Cadastro cancelado.**\n"
-                "📌 O canal foi mantido salvo para histórico.\n"
-                "⚠️ Nada foi apagado."
-            )
-
             await enviar_log(
                 "Cadastro de Procurado Cancelado",
                 f"👤 Cancelado por: {interaction.user.mention}\n"
-                f"📂 Canal mantido: {interaction.channel.mention}\n"
-                f"⚠️ Nada foi apagado."
+                f"📂 Canal provisório: {interaction.channel.mention}\n"
+                f"🗑️ Canal provisório apagado após cancelar."
             )
 
             await interaction.followup.send(
-                "✅ Cadastro cancelado. O canal foi mantido salvo.",
+                "🗑️ Cadastro cancelado. O canal provisório será apagado em 5 segundos.",
                 ephemeral=True
             )
+
+            await asyncio.sleep(5)
+
+            try:
+                await interaction.channel.delete()
+            except Exception as e:
+                await enviar_log(
+                    "Erro ao Apagar Canal Provisório",
+                    f"📂 Canal: {interaction.channel.mention}\n"
+                    f"⚠️ Erro: `{e}`"
+                )
 
         except Exception as e:
             await interaction.followup.send(
@@ -746,73 +779,134 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
-        lista = carregar_procurados()
-        procurado = None
+        try:
+            lista = carregar_procurados()
+            procurado = None
 
-        for p in lista:
-            if str(p["rg"]) == str(self.rg.value) and p.get("status", "ativo") == "ativo":
-                procurado = p
-                break
+            for p in lista:
+                if str(p["rg"]) == str(self.rg.value) and p.get("status", "ativo") == "ativo":
+                    procurado = p
+                    break
 
-        if procurado is None:
+            if procurado is None:
+                await interaction.followup.send(
+                    "❌ Procurado não encontrado ou já retirado.",
+                    ephemeral=True
+                )
+                return
+
+            canal_procurados = bot.get_channel(procurado.get("canal_id", PROCURADOS_CHANNEL_ID))
+            historico = bot.get_channel(HISTORICO_PROCURADOS_ID)
+
+            if historico is None:
+                await interaction.followup.send(
+                    "❌ Canal de histórico não encontrado. O post não foi apagado.",
+                    ephemeral=True
+                )
+
+                await enviar_log(
+                    "Erro ao Retirar Procurado",
+                    f"❌ Canal de histórico não encontrado.\n"
+                    f"🆔 RG: `{procurado['rg']}`\n"
+                    f"⚠️ Post original não foi apagado."
+                )
+                return
+
+            arquivos_historico = []
+            mensagem_original = None
+            apagou_post = False
+
+            if canal_procurados:
+                try:
+                    mensagem_original = await canal_procurados.fetch_message(procurado["mensagem_id"])
+
+                    for anexo in mensagem_original.attachments:
+                        try:
+                            arquivos_historico.append(await anexo.to_file())
+                        except Exception:
+                            pass
+
+                except Exception:
+                    mensagem_original = None
+
+            texto_historico = f"""
+📂 **HISTÓRICO DE PROCURADO RETIRADO**
+
+👤 **Nome:** {procurado['nome']}
+🆔 **RG:** {procurado['rg']}
+
+📍 **Último avistamento:**
+{procurado['ultimo']}
+
+⚠️ **Crimes imputados:**
+{procurado['crimes']}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+📌 **Motivo da retirada:**
+{self.motivo.value}
+
+👮 **Retirado por:** {interaction.user.mention}
+
+⚠️ Registro enviado ao histórico antes da remoção do post original.
+"""
+
+            if arquivos_historico:
+                await historico.send(
+                    content=texto_historico,
+                    files=arquivos_historico
+                )
+            else:
+                await historico.send(
+                    content=texto_historico
+                )
+
+            if mensagem_original:
+                try:
+                    await mensagem_original.delete()
+                    apagou_post = True
+                except Exception as e:
+                    await enviar_log(
+                        "Erro ao Apagar Post do Procurado",
+                        f"👤 Nome: `{procurado['nome']}`\n"
+                        f"🆔 RG: `{procurado['rg']}`\n"
+                        f"⚠️ Erro: `{e}`"
+                    )
+
+            procurado["status"] = "retirado"
+            procurado["motivo_retirada"] = self.motivo.value
+            procurado["retirado_por"] = interaction.user.name
+            procurado["retirado_por_id"] = interaction.user.id
+            procurado["post_original_apagado"] = apagou_post
+
+            salvar_procurados(lista)
+
+            await enviar_log(
+                "Procurado Retirado",
+                f"👤 Nome: `{procurado['nome']}`\n"
+                f"🆔 RG: `{procurado['rg']}`\n"
+                f"📌 Motivo: {self.motivo.value}\n"
+                f"👮 Retirado por: {interaction.user.mention}\n"
+                f"📂 Enviado para histórico: Sim\n"
+                f"🗑️ Post original apagado: {'Sim' if apagou_post else 'Não'}"
+            )
+
             await interaction.followup.send(
-                "❌ Procurado não encontrado ou já retirado.",
+                f"✅ Procurado **{procurado['nome']}** foi enviado ao histórico e retirado com sucesso.",
                 ephemeral=True
             )
-            return
 
-        canal_procurados = bot.get_channel(procurado.get("canal_id", PROCURADOS_CHANNEL_ID))
-
-        try:
-            mensagem = await canal_procurados.fetch_message(procurado["mensagem_id"])
-
-            novo_texto = (
-                "❌ **PROCURADO RETIRADO DO SISTEMA** ❌\n\n"
-                f"👤 **Nome:** {procurado['nome']}\n"
-                f"🆔 **RG:** {procurado['rg']}\n\n"
-                f"📌 **Motivo da retirada:**\n{self.motivo.value}\n\n"
-                f"👮 **Retirado por:** {interaction.user.mention}\n\n"
-                "⚠️ Esta publicação foi mantida para histórico. Nada foi apagado."
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao retirar procurado: `{e}`",
+                ephemeral=True
             )
 
-            await mensagem.edit(content=novo_texto)
-
-        except Exception:
-            pass
-
-        procurado["status"] = "retirado"
-        procurado["motivo_retirada"] = self.motivo.value
-        procurado["retirado_por"] = interaction.user.name
-        procurado["retirado_por_id"] = interaction.user.id
-
-        salvar_procurados(lista)
-
-        historico = bot.get_channel(HISTORICO_PROCURADOS_ID)
-
-        if historico:
-            await historico.send(
-                f"📂 **Procurado removido do sistema**\n\n"
-                f"👤 Nome: {procurado['nome']}\n"
-                f"🆔 RG: {procurado['rg']}\n"
-                f"⚠️ Crimes: {procurado['crimes']}\n\n"
-                f"📌 **Motivo:**\n{self.motivo.value}\n\n"
-                f"👮 Removido por: {interaction.user.mention}\n\n"
-                f"⚠️ O post original foi mantido e marcado como retirado."
+            await enviar_log(
+                "Erro ao Retirar Procurado",
+                f"👤 Usuário: {interaction.user.mention}\n"
+                f"⚠️ Erro: `{e}`"
             )
-
-        await enviar_log(
-            "Procurado Retirado",
-            f"👤 Nome: `{procurado['nome']}`\n"
-            f"🆔 RG: `{procurado['rg']}`\n"
-            f"📌 Motivo: {self.motivo.value}\n"
-            f"👮 Retirado por: {interaction.user.mention}\n"
-            f"⚠️ Post original mantido. Nada foi apagado."
-        )
-
-        await interaction.followup.send(
-            f"✅ Procurado **{procurado['nome']}** marcado como retirado com sucesso.",
-            ephemeral=True
-        )
 
 
 # =========================
@@ -922,7 +1016,7 @@ async def painelprocurados(interaction: discord.Interaction):
     )
 
 
-@tree.command(name="listarprocurados", description="Lista os procurados cadastrados")
+@tree.command(name="listarprocurados", description="Lista os procurados ativos cadastrados")
 async def listarprocurados(interaction: discord.Interaction):
     lista = carregar_procurados()
     ativos = [p for p in lista if p.get("status", "ativo") == "ativo"]
