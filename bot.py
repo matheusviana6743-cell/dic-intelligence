@@ -161,6 +161,122 @@ async def backup_diario():
             )
 
         os.remove(nome_arquivo)
+def limpar(texto):
+    return html.escape(texto or "")
+
+@tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=ZoneInfo("America/Sao_Paulo")))
+async def backup_diario():
+    for guild in bot.guilds:
+        data = datetime.datetime.now().strftime("%d-%m-%Y")
+        nome_arquivo = f"backup-{guild.name}-{data}.html".replace(" ", "-")
+
+        conteudo = f"""
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Backup {guild.name}</title>
+            <style>
+                body {{
+                    background: #111;
+                    color: #eee;
+                    font-family: Arial;
+                    padding: 20px;
+                }}
+                h1 {{
+                    color: #4da3ff;
+                }}
+                .canal {{
+                    color: #ffd166;
+                    margin-top: 30px;
+                    border-bottom: 1px solid #444;
+                }}
+                .msg {{
+                    background: #1b1b1b;
+                    border: 1px solid #333;
+                    border-radius: 8px;
+                    padding: 10px;
+                    margin: 10px 0;
+                }}
+                .autor {{
+                    color: #7dd3fc;
+                    font-weight: bold;
+                }}
+                .data {{
+                    color: #999;
+                    font-size: 12px;
+                }}
+                .anexo {{
+                    margin-top: 8px;
+                }}
+                img {{
+                    max-width: 400px;
+                    border-radius: 8px;
+                    margin-top: 8px;
+                }}
+                a {{
+                    color: #90ee90;
+                }}
+            </style>
+        </head>
+        <body>
+        <h1>📦 Backup do servidor: {limpar(guild.name)}</h1>
+        <h3>Data: {data}</h3>
+        """
+
+        for canal in guild.text_channels:
+            conteudo += f"<h2 class='canal'># {limpar(canal.name)}</h2>"
+
+            try:
+                async for msg in canal.history(limit=500, oldest_first=True):
+                    anexos_html = ""
+
+                    for anexo in msg.attachments:
+                        url = anexo.url
+                        nome = limpar(anexo.filename)
+
+                        if anexo.content_type and anexo.content_type.startswith("image/"):
+                            anexos_html += f"""
+                            <div class="anexo">
+                                📷 <b>Imagem:</b> <a href="{url}">{nome}</a><br>
+                                <img src="{url}">
+                            </div>
+                            """
+                        else:
+                            anexos_html += f"""
+                            <div class="anexo">
+                                📎 <b>Arquivo:</b> <a href="{url}">{nome}</a>
+                            </div>
+                            """
+
+                    conteudo += f"""
+                    <div class="msg">
+                        <div class="autor">{limpar(str(msg.author))}</div>
+                        <div class="data">{msg.created_at.strftime('%d/%m/%Y %H:%M')}</div>
+                        <div>{limpar(msg.content)}</div>
+                        {anexos_html}
+                    </div>
+                    """
+
+            except Exception as e:
+                conteudo += f"<p>❌ Erro ao salvar canal {limpar(canal.name)}: {limpar(str(e))}</p>"
+
+        conteudo += """
+        </body>
+        </html>
+        """
+
+        with open(nome_arquivo, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+
+        canal_backup = bot.get_channel(BACKUP_CHANNEL_ID)
+
+        if canal_backup:
+            await canal_backup.send(
+                content=f"📦 Backup diário completo de **{guild.name}**",
+                file=discord.File(nome_arquivo)
+            )
+
+        os.remove(nome_arquivo)
 
 @bot.event
 async def on_ready():
