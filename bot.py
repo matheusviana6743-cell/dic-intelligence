@@ -242,7 +242,7 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
             )
             return
 
-                apelido = interaction.user.display_name
+        apelido = interaction.user.display_name
         familia = nome_familia
 
         apelido_formatado = nome_seguro(apelido)
@@ -326,7 +326,6 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
             f"👤 Usuário: {interaction.user.mention}\n"
             f"⚠️ Erro: `{e}`"
         )
-
 
 # =========================
 # BACKUP
