@@ -18,7 +18,13 @@ TOKEN = os.getenv("TOKEN")
 # IDS
 # =========================
 
-CARGO_EQUIPE_ID = 1514762487831072819
+CARGOS_EQUIPE_IDS = [
+    1490200382776021132,  # Delegado
+    1490200383614615725,  # Vice-Diretor
+    1490200390426165290,  # Investigadores
+    1490200388912156692,  # Inspetor
+    1490200384818647051   # Delegado Denarc
+]
 
 BACKUP_CHANNEL_ID = 1514811262813339648
 
@@ -26,7 +32,6 @@ PROCURADOS_CHANNEL_ID = 1515040708971597894
 HISTORICO_PROCURADOS_ID = 1515052449776533745
 LOGS_CHANNEL_ID = 1515052409532055662
 
-# Categorias das mesas
 CATEGORIA_MESAS_ABERTAS_ID = 1515079970722938920
 CATEGORIA_MESAS_FECHADAS_ID = 1515052497025372160
 
@@ -68,17 +73,16 @@ def limpar(texto):
 
 
 def nome_seguro(texto):
-    texto = str(texto).lower().strip()
+    texto = str(texto).strip()
     texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
-    texto = texto.replace(" ", "-")
-    texto = re.sub(r"[^a-z0-9-]", "", texto)
-    texto = re.sub(r"-+", "-", texto)
-    texto = texto.strip("-")
+    texto = re.sub(r"[^A-Za-z0-9 -]", "", texto)
+    texto = re.sub(r"\s+", " ", texto)
+    texto = texto.strip()
 
     if not texto:
-        texto = "sem-nome"
+        texto = "Sem Nome"
 
-    return texto[:70]
+    return texto[:45]
 
 
 def carregar_procurados():
@@ -95,6 +99,18 @@ def carregar_procurados():
 def salvar_procurados(lista):
     with open(ARQUIVO_PROCURADOS, "w", encoding="utf-8") as f:
         json.dump(lista, f, ensure_ascii=False, indent=4)
+
+
+def obter_cargos_equipe(guild):
+    cargos = []
+
+    for cargo_id in CARGOS_EQUIPE_IDS:
+        cargo = guild.get_role(cargo_id)
+
+        if cargo:
+            cargos.append(cargo)
+
+    return cargos
 
 
 async def enviar_log(titulo, descricao):
@@ -138,7 +154,6 @@ class FecharMesaView(discord.ui.View):
                     "❌ Categoria de mesas fechadas não encontrada.",
                     ephemeral=True
                 )
-
                 await enviar_log(
                     "Erro ao Fechar Mesa",
                     f"❌ Categoria de mesas fechadas não encontrada.\n"
@@ -148,8 +163,8 @@ class FecharMesaView(discord.ui.View):
 
             novo_nome = canal.name
 
-            if not novo_nome.startswith("🔒┃"):
-                novo_nome = f"🔒┃{novo_nome}"
+            if not novo_nome.startswith("🔒"):
+                novo_nome = f"🔒 ┃{novo_nome}"
 
             await canal.edit(
                 name=novo_nome,
@@ -183,10 +198,11 @@ class FecharMesaView(discord.ui.View):
                 f"⚠️ Erro: `{e}`"
             )
 
+
 class CriarMesaModal(discord.ui.Modal, title="Criar Mesa Investigativa"):
     nome_familia = discord.ui.TextInput(
         label="Nome da família / investigação",
-        placeholder="Exemplo: Fazenda, Olimpo, Mantém...",
+        placeholder="Exemplo: Elements, Fazenda, Olimpo...",
         required=True,
         max_length=50
     )
@@ -216,7 +232,7 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
         guild = interaction.guild
 
         categoria_abertas = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
-        cargo_equipe = guild.get_role(CARGO_EQUIPE_ID)
+        cargos_equipe = obter_cargos_equipe(guild)
 
         if categoria_abertas is None:
             await interaction.followup.send(
@@ -230,25 +246,21 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
             )
             return
 
-        if cargo_equipe is None:
+        if not cargos_equipe:
             await interaction.followup.send(
-                "❌ Erro: cargo da equipe não encontrado.",
+                "❌ Erro: nenhum cargo da equipe foi encontrado.",
                 ephemeral=True
             )
             await enviar_log(
                 "Erro ao Criar Mesa",
-                f"❌ Cargo da equipe não encontrado.\n"
-                f"ID usado: `{CARGO_EQUIPE_ID}`"
+                "❌ Nenhum cargo da equipe foi encontrado."
             )
             return
 
-        apelido = interaction.user.display_name
-        familia = nome_familia
+        apelido = nome_seguro(interaction.user.display_name)
+        familia = nome_seguro(nome_familia)
 
-        apelido_formatado = nome_seguro(apelido)
-        familia_formatada = nome_seguro(familia)
-
-        nome_canal = f"🕵️‍♂️┃{apelido_formatado}•{familia_formatada}"
+        nome_canal = f"🕵️‍♂️ ┃{apelido} • {familia}"
 
         canal_existente = discord.utils.get(
             guild.text_channels,
@@ -269,14 +281,16 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
                 send_messages=True,
                 attach_files=True,
                 read_message_history=True
-            ),
-            cargo_equipe: discord.PermissionOverwrite(
+            )
+        }
+
+        for cargo in cargos_equipe:
+            overwrites[cargo] = discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
                 attach_files=True,
                 read_message_history=True
             )
-        }
 
         canal = await guild.create_text_channel(
             name=nome_canal,
@@ -302,12 +316,15 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
                 f"Envie aqui fotos, documentos, textos e informações deste tópico."
             )
 
+        cargos_texto = "\n".join([f"• {cargo.mention}" for cargo in cargos_equipe])
+
         await enviar_log(
             "Mesa Criada",
             f"👤 Usuário: {interaction.user.mention}\n"
             f"🕵️‍♂️ Investigação/Família: `{nome_familia}`\n"
             f"📂 Mesa: {canal.mention}\n"
-            f"📁 Categoria: `{CATEGORIA_MESAS_ABERTAS_ID}`"
+            f"📁 Categoria: `{CATEGORIA_MESAS_ABERTAS_ID}`\n\n"
+            f"👥 Cargos com acesso:\n{cargos_texto}"
         )
 
         await interaction.followup.send(
@@ -326,6 +343,7 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
             f"👤 Usuário: {interaction.user.mention}\n"
             f"⚠️ Erro: `{e}`"
         )
+
 
 # =========================
 # BACKUP
@@ -515,7 +533,7 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
         try:
             guild = interaction.guild
             categoria = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
-            cargo = guild.get_role(CARGO_EQUIPE_ID)
+            cargos_equipe = obter_cargos_equipe(guild)
 
             if categoria is None:
                 await interaction.followup.send(
@@ -524,9 +542,9 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
                 )
                 return
 
-            if cargo is None:
+            if not cargos_equipe:
                 await interaction.followup.send(
-                    "❌ Cargo da equipe não encontrado.",
+                    "❌ Nenhum cargo da equipe foi encontrado.",
                     ephemeral=True
                 )
                 return
@@ -540,14 +558,16 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
                     send_messages=True,
                     attach_files=True,
                     read_message_history=True
-                ),
-                cargo: discord.PermissionOverwrite(
+                )
+            }
+
+            for cargo in cargos_equipe:
+                overwrites[cargo] = discord.PermissionOverwrite(
                     view_channel=True,
                     send_messages=True,
                     attach_files=True,
                     read_message_history=True
                 )
-            }
 
             canal = await guild.create_text_channel(
                 name=nome_canal,
