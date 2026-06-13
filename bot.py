@@ -1075,5 +1075,484 @@ async def listarprocurados(interaction: discord.Interaction):
 async def retirarprocurado(interaction: discord.Interaction):
     await interaction.response.send_modal(RetirarProcuradoModal())
 
+# =========================
+# COMANDOS EXTRAS
+# =========================
 
+def remover_prefixo_fechada(nome):
+    nome = nome.replace("🔒 ┃", "")
+    nome = nome.replace("🔒┃", "")
+    nome = nome.replace("fechada-", "")
+    return nome
+
+
+@tree.command(name="ajuda", description="Mostra todos os comandos do bot")
+async def ajuda(interaction: discord.Interaction):
+    texto = """
+📌 **COMANDOS DO BOT DIC**
+
+📂 **Mesas**
+`/painel` — Cria o painel para abrir mesas.
+`/minhasmesas` — Mostra suas mesas.
+`/fecharmesa` — Fecha uma mesa e move para fechadas.
+`/reabrirmesa` — Reabre uma mesa fechada.
+`/addmembro` — Adiciona um membro em uma mesa.
+`/removermembro` — Remove um membro de uma mesa.
+`/statusmesa` — Define o status da mesa.
+`/relatorio` — Gera relatório da mesa.
+
+🚨 **Procurados**
+`/painelprocurados` — Cria painel de procurados.
+`/listarprocurados` — Lista procurados ativos.
+`/procuradoinfo` — Busca um procurado pelo RG.
+`/retirarprocurado` — Retira procurado e manda para histórico.
+
+📦 **Backup**
+`/testebackup` — Executa backup na hora.
+"""
+
+    await interaction.response.send_message(texto, ephemeral=True)
+
+    await enviar_log(
+        "Comando Ajuda Usado",
+        f"👤 Usuário: {interaction.user.mention}"
+    )
+
+
+@tree.command(name="minhasmesas", description="Mostra as mesas que você tem acesso direto")
+async def minhasmesas(interaction: discord.Interaction):
+    guild = interaction.guild
+    mesas = []
+
+    categorias_ids = [
+        CATEGORIA_MESAS_ABERTAS_ID,
+        CATEGORIA_MESAS_FECHADAS_ID
+    ]
+
+    for canal in guild.text_channels:
+        if canal.category_id not in categorias_ids:
+            continue
+
+        permissao_usuario = canal.overwrites_for(interaction.user)
+
+        if permissao_usuario.view_channel is True:
+            mesas.append(canal)
+
+    if not mesas:
+        await interaction.response.send_message(
+            "📂 Você não possui mesas próprias no momento.",
+            ephemeral=True
+        )
+        return
+
+    texto = "📂 **Suas mesas:**\n\n"
+
+    for canal in mesas[:25]:
+        texto += f"• {canal.mention}\n"
+
+    await interaction.response.send_message(texto, ephemeral=True)
+
+    await enviar_log(
+        "Minhas Mesas Consultado",
+        f"👤 Usuário: {interaction.user.mention}\n"
+        f"📊 Mesas encontradas: `{len(mesas)}`"
+    )
+
+
+@tree.command(name="fecharmesa", description="Fecha uma mesa e move para a categoria de fechadas")
+@app_commands.describe(canal="Canal da mesa que será fechada")
+async def fecharmesa(interaction: discord.Interaction, canal: discord.TextChannel):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        categoria_fechadas = interaction.guild.get_channel(CATEGORIA_MESAS_FECHADAS_ID)
+
+        if categoria_fechadas is None:
+            await interaction.followup.send(
+                "❌ Categoria de mesas fechadas não encontrada.",
+                ephemeral=True
+            )
+            return
+
+        novo_nome = canal.name
+
+        if not novo_nome.startswith("🔒"):
+            novo_nome = f"🔒 ┃{novo_nome}"
+
+        await canal.edit(
+            name=novo_nome,
+            category=categoria_fechadas
+        )
+
+        await canal.send("🔒 **Mesa fechada por comando e movida para a categoria de fechadas.**")
+
+        await enviar_log(
+            "Mesa Fechada por Comando",
+            f"👤 Fechada por: {interaction.user.mention}\n"
+            f"📁 Mesa: {canal.mention}"
+        )
+
+        await interaction.followup.send(
+            f"✅ Mesa fechada com sucesso: {canal.mention}",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao fechar mesa: `{e}`",
+            ephemeral=True
+        )
+
+
+@tree.command(name="reabrirmesa", description="Reabre uma mesa fechada")
+@app_commands.describe(canal="Canal da mesa que será reaberta")
+async def reabrirmesa(interaction: discord.Interaction, canal: discord.TextChannel):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        categoria_abertas = interaction.guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
+
+        if categoria_abertas is None:
+            await interaction.followup.send(
+                "❌ Categoria de mesas abertas não encontrada.",
+                ephemeral=True
+            )
+            return
+
+        novo_nome = remover_prefixo_fechada(canal.name)
+
+        await canal.edit(
+            name=novo_nome,
+            category=categoria_abertas
+        )
+
+        await canal.send("📂 **Mesa reaberta e movida para a categoria de mesas abertas.**")
+
+        await enviar_log(
+            "Mesa Reaberta",
+            f"👤 Reaberta por: {interaction.user.mention}\n"
+            f"📂 Mesa: {canal.mention}"
+        )
+
+        await interaction.followup.send(
+            f"✅ Mesa reaberta com sucesso: {canal.mention}",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao reabrir mesa: `{e}`",
+            ephemeral=True
+        )
+
+
+@tree.command(name="addmembro", description="Adiciona um membro em uma mesa")
+@app_commands.describe(
+    canal="Canal da mesa",
+    membro="Membro que será adicionado"
+)
+async def addmembro(interaction: discord.Interaction, canal: discord.TextChannel, membro: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        await canal.set_permissions(
+            membro,
+            view_channel=True,
+            send_messages=True,
+            attach_files=True,
+            read_message_history=True
+        )
+
+        await canal.send(f"✅ {membro.mention} foi adicionado à mesa por {interaction.user.mention}.")
+
+        await enviar_log(
+            "Membro Adicionado à Mesa",
+            f"👤 Adicionado: {membro.mention}\n"
+            f"👮 Por: {interaction.user.mention}\n"
+            f"📂 Mesa: {canal.mention}"
+        )
+
+        await interaction.followup.send(
+            f"✅ {membro.mention} foi adicionado à mesa {canal.mention}.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao adicionar membro: `{e}`",
+            ephemeral=True
+        )
+
+
+@tree.command(name="removermembro", description="Remove um membro de uma mesa")
+@app_commands.describe(
+    canal="Canal da mesa",
+    membro="Membro que será removido"
+)
+async def removermembro(interaction: discord.Interaction, canal: discord.TextChannel, membro: discord.Member):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        await canal.set_permissions(membro, overwrite=None)
+
+        await canal.send(f"❌ {membro.mention} foi removido da mesa por {interaction.user.mention}.")
+
+        await enviar_log(
+            "Membro Removido da Mesa",
+            f"👤 Removido: {membro.mention}\n"
+            f"👮 Por: {interaction.user.mention}\n"
+            f"📂 Mesa: {canal.mention}"
+        )
+
+        await interaction.followup.send(
+            f"✅ {membro.mention} foi removido da mesa {canal.mention}.",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao remover membro: `{e}`",
+            ephemeral=True
+        )
+
+
+@tree.command(name="statusmesa", description="Define o status de uma mesa")
+@app_commands.describe(
+    canal="Canal da mesa",
+    status="Status da mesa"
+)
+@app_commands.choices(status=[
+    app_commands.Choice(name="🟢 Em andamento", value="🟢 Em andamento"),
+    app_commands.Choice(name="🟡 Em análise", value="🟡 Em análise"),
+    app_commands.Choice(name="🔴 Prioridade", value="🔴 Prioridade"),
+    app_commands.Choice(name="🔒 Fechada", value="🔒 Fechada")
+])
+async def statusmesa(interaction: discord.Interaction, canal: discord.TextChannel, status: app_commands.Choice[str]):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        await canal.send(
+            f"📌 **Status da mesa atualizado:** {status.value}\n"
+            f"👮 Alterado por: {interaction.user.mention}"
+        )
+
+        await enviar_log(
+            "Status da Mesa Atualizado",
+            f"📂 Mesa: {canal.mention}\n"
+            f"📌 Status: `{status.value}`\n"
+            f"👤 Alterado por: {interaction.user.mention}"
+        )
+
+        await interaction.followup.send(
+            f"✅ Status da mesa atualizado para: **{status.value}**",
+            ephemeral=True
+        )
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao atualizar status: `{e}`",
+            ephemeral=True
+        )
+
+
+@tree.command(name="relatorio", description="Gera um relatório de uma mesa")
+@app_commands.describe(canal="Canal da mesa")
+async def relatorio(interaction: discord.Interaction, canal: discord.TextChannel):
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        data = datetime.datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d-%m-%Y_%H-%M")
+        nome_arquivo = f"relatorio-{canal.name}-{data}.html".replace(" ", "-")
+
+        conteudo = f"""
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Relatório {limpar(canal.name)}</title>
+            <style>
+                body {{
+                    background: #111;
+                    color: #eee;
+                    font-family: Arial;
+                    padding: 20px;
+                }}
+                h1 {{
+                    color: #4da3ff;
+                }}
+                h2 {{
+                    color: #ffd166;
+                    border-bottom: 1px solid #444;
+                    margin-top: 30px;
+                }}
+                .msg {{
+                    background: #1b1b1b;
+                    border: 1px solid #333;
+                    border-radius: 8px;
+                    padding: 10px;
+                    margin: 10px 0;
+                }}
+                .autor {{
+                    color: #7dd3fc;
+                    font-weight: bold;
+                }}
+                .data {{
+                    color: #999;
+                    font-size: 12px;
+                }}
+                img {{
+                    max-width: 400px;
+                    border-radius: 8px;
+                    margin-top: 8px;
+                }}
+                a {{
+                    color: #90ee90;
+                }}
+            </style>
+        </head>
+        <body>
+        <h1>📂 Relatório da Mesa: {limpar(canal.name)}</h1>
+        <h3>Gerado por: {limpar(interaction.user.display_name)}</h3>
+        <h3>Data: {data}</h3>
+        """
+
+        conteudo += "<h2>📌 Mensagens do Canal Principal</h2>"
+
+        async for msg in canal.history(limit=500, oldest_first=True):
+            anexos_html = ""
+
+            for anexo in msg.attachments:
+                url = anexo.url
+                nome = limpar(anexo.filename)
+
+                if anexo.content_type and anexo.content_type.startswith("image/"):
+                    anexos_html += f"""
+                    <p>📷 <a href="{url}">{nome}</a></p>
+                    <img src="{url}">
+                    """
+                else:
+                    anexos_html += f"""
+                    <p>📎 <a href="{url}">{nome}</a></p>
+                    """
+
+            conteudo += f"""
+            <div class="msg">
+                <div class="autor">{limpar(str(msg.author))}</div>
+                <div class="data">{msg.created_at.strftime('%d/%m/%Y %H:%M')}</div>
+                <div>{limpar(msg.content)}</div>
+                {anexos_html}
+            </div>
+            """
+
+        for thread in canal.threads:
+            conteudo += f"<h2>🧵 {limpar(thread.name)}</h2>"
+
+            async for msg in thread.history(limit=500, oldest_first=True):
+                anexos_html = ""
+
+                for anexo in msg.attachments:
+                    url = anexo.url
+                    nome = limpar(anexo.filename)
+
+                    if anexo.content_type and anexo.content_type.startswith("image/"):
+                        anexos_html += f"""
+                        <p>📷 <a href="{url}">{nome}</a></p>
+                        <img src="{url}">
+                        """
+                    else:
+                        anexos_html += f"""
+                        <p>📎 <a href="{url}">{nome}</a></p>
+                        """
+
+                conteudo += f"""
+                <div class="msg">
+                    <div class="autor">{limpar(str(msg.author))}</div>
+                    <div class="data">{msg.created_at.strftime('%d/%m/%Y %H:%M')}</div>
+                    <div>{limpar(msg.content)}</div>
+                    {anexos_html}
+                </div>
+                """
+
+        conteudo += """
+        </body>
+        </html>
+        """
+
+        with open(nome_arquivo, "w", encoding="utf-8") as f:
+            f.write(conteudo)
+
+        await interaction.followup.send(
+            content=f"📄 Relatório gerado da mesa {canal.mention}",
+            file=discord.File(nome_arquivo),
+            ephemeral=True
+        )
+
+        await enviar_log(
+            "Relatório de Mesa Gerado",
+            f"👤 Gerado por: {interaction.user.mention}\n"
+            f"📂 Mesa: {canal.mention}"
+        )
+
+        if os.path.exists(nome_arquivo):
+            os.remove(nome_arquivo)
+
+    except Exception as e:
+        await interaction.followup.send(
+            f"❌ Erro ao gerar relatório: `{e}`",
+            ephemeral=True
+        )
+
+
+@tree.command(name="procuradoinfo", description="Busca informações de um procurado pelo RG")
+@app_commands.describe(rg="RG do procurado")
+async def procuradoinfo(interaction: discord.Interaction, rg: str):
+    lista = carregar_procurados()
+    procurado = None
+
+    for p in lista:
+        if str(p["rg"]) == str(rg):
+            procurado = p
+            break
+
+    if procurado is None:
+        await interaction.response.send_message(
+            "❌ Procurado não encontrado.",
+            ephemeral=True
+        )
+        return
+
+    status = procurado.get("status", "ativo")
+
+    texto = f"""
+🚨 **Informações do Procurado**
+
+👤 **Nome:** {procurado.get('nome')}
+🆔 **RG:** {procurado.get('rg')}
+📌 **Status:** {status}
+
+📍 **Último avistamento:**
+{procurado.get('ultimo')}
+
+⚠️ **Crimes:**
+{procurado.get('crimes')}
+"""
+
+    if status == "retirado":
+        texto += f"""
+
+📂 **Retirado do sistema**
+
+📌 **Motivo:**
+{procurado.get('motivo_retirada', 'Não informado')}
+
+👮 **Retirado por:**
+{procurado.get('retirado_por', 'Não informado')}
+"""
+
+    await interaction.response.send_message(texto, ephemeral=True)
+
+    await enviar_log(
+        "Consulta de Procurado",
+        f"👤 Consultado por: {interaction.user.mention}\n"
+        f"🆔 RG: `{rg}`"
+    )
 bot.run(TOKEN)
