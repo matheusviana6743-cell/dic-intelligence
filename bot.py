@@ -18,6 +18,8 @@ TOKEN = os.getenv("TOKEN")
 # IDS
 # =========================
 
+SERVIDOR_DIC_ID = 1490192785553494167
+
 CARGOS_EQUIPE_IDS = [
     1490200382776021132,  # Delegado
     1490200383614615725,  # Vice-Diretor
@@ -26,14 +28,21 @@ CARGOS_EQUIPE_IDS = [
     1490200384818647051   # Delegado Denarc
 ]
 
-BACKUP_CHANNEL_ID = 1515165673276440677
+CARGOS_ADMIN_IDS = [
+    1490200382776021132,  # Delegado
+    1490200383614615725,  # Vice-Diretor
+    1490200384818647051,  # Delegado Denarc
+    1490200390426165290   # Investigador
+]
 
-PROCURADOS_CHANNEL_ID = 1490200533980545097
-HISTORICO_PROCURADOS_ID = 1490200536207855857
-LOGS_CHANNEL_ID = 1490205503228477610
+BACKUP_CHANNEL_ID = 1514811262813339648
 
-CATEGORIA_MESAS_ABERTAS_ID = 1490200456855552192
-CATEGORIA_MESAS_FECHADAS_ID = 1515165416815722586
+PROCURADOS_CHANNEL_ID = 1515040708971597894
+HISTORICO_PROCURADOS_ID = 1515052449776533745
+LOGS_CHANNEL_ID = 1515052409532055662
+
+CATEGORIA_MESAS_ABERTAS_ID = 1515079970722938920
+CATEGORIA_MESAS_FECHADAS_ID = 1515052497025372160
 
 ARQUIVO_PROCURADOS = "procurados.json"
 
@@ -111,6 +120,21 @@ def obter_cargos_equipe(guild):
             cargos.append(cargo)
 
     return cargos
+
+
+def usuario_admin(membro):
+    for cargo in membro.roles:
+        if cargo.id in CARGOS_ADMIN_IDS:
+            return True
+
+    return False
+
+
+def limpar_nome_mesa_fechada(nome):
+    nome = nome.replace("🔒 ┃", "")
+    nome = nome.replace("🔒┃", "")
+    nome = nome.replace("fechada-", "")
+    return nome.strip()
 
 
 async def enviar_log(titulo, descricao):
@@ -350,68 +374,106 @@ async def criar_mesa(interaction: discord.Interaction, nome_familia: str):
 # =========================
 
 async def executar_backup(manual=False, usuario=None):
-    for guild in bot.guilds:
-        data = datetime.datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d-%m-%Y_%H-%M")
-        nome_arquivo = f"backup-{guild.name}-{data}.html".replace(" ", "-")
+    guild = bot.get_guild(SERVIDOR_DIC_ID)
 
-        conteudo = f"""
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <title>Backup {limpar(guild.name)}</title>
-            <style>
-                body {{
-                    background: #111;
-                    color: #eee;
-                    font-family: Arial;
-                    padding: 20px;
-                }}
-                h1 {{
-                    color: #4da3ff;
-                }}
-                .canal {{
-                    color: #ffd166;
-                    margin-top: 30px;
-                    border-bottom: 1px solid #444;
-                }}
-                .msg {{
-                    background: #1b1b1b;
-                    border: 1px solid #333;
-                    border-radius: 8px;
-                    padding: 10px;
-                    margin: 10px 0;
-                }}
-                .autor {{
-                    color: #7dd3fc;
-                    font-weight: bold;
-                }}
-                .data {{
-                    color: #999;
-                    font-size: 12px;
-                }}
-                .anexo {{
-                    margin-top: 8px;
-                }}
-                img {{
-                    max-width: 400px;
-                    border-radius: 8px;
-                    margin-top: 8px;
-                }}
-                a {{
-                    color: #90ee90;
-                }}
-            </style>
-        </head>
-        <body>
-        <h1>📦 Backup do servidor: {limpar(guild.name)}</h1>
-        <h3>Data: {data}</h3>
-        """
+    if guild is None:
+        await enviar_log(
+            "Erro no Backup",
+            f"❌ Servidor DIC não encontrado.\nID: `{SERVIDOR_DIC_ID}`"
+        )
+        return
 
-        for canal in guild.text_channels:
-            conteudo += f"<h2 class='canal'># {limpar(canal.name)}</h2>"
+    data = datetime.datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d-%m-%Y_%H-%M")
+    nome_arquivo = f"backup-DIC-{data}.html"
+
+    conteudo = f"""
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Backup DIC</title>
+        <style>
+            body {{
+                background: #111;
+                color: #eee;
+                font-family: Arial;
+                padding: 20px;
+            }}
+            h1 {{
+                color: #4da3ff;
+            }}
+            .canal {{
+                color: #ffd166;
+                margin-top: 30px;
+                border-bottom: 1px solid #444;
+            }}
+            .msg {{
+                background: #1b1b1b;
+                border: 1px solid #333;
+                border-radius: 8px;
+                padding: 10px;
+                margin: 10px 0;
+            }}
+            .autor {{
+                color: #7dd3fc;
+                font-weight: bold;
+            }}
+            .data {{
+                color: #999;
+                font-size: 12px;
+            }}
+            img {{
+                max-width: 400px;
+                border-radius: 8px;
+                margin-top: 8px;
+            }}
+            a {{
+                color: #90ee90;
+            }}
+        </style>
+    </head>
+    <body>
+    <h1>📦 Backup do servidor DIC: {limpar(guild.name)}</h1>
+    <h3>Data: {data}</h3>
+    """
+
+    for canal in guild.text_channels:
+        conteudo += f"<h2 class='canal'># {limpar(canal.name)}</h2>"
+
+        try:
+            async for msg in canal.history(limit=500, oldest_first=True):
+                anexos_html = ""
+
+                for anexo in msg.attachments:
+                    url = anexo.url
+                    nome = limpar(anexo.filename)
+
+                    if anexo.content_type and anexo.content_type.startswith("image/"):
+                        anexos_html += f"""
+                        <p>📷 <a href="{url}">{nome}</a></p>
+                        <img src="{url}">
+                        """
+                    else:
+                        anexos_html += f"""
+                        <p>📎 <a href="{url}">{nome}</a></p>
+                        """
+
+                conteudo += f"""
+                <div class="msg">
+                    <div class="autor">{limpar(str(msg.author))}</div>
+                    <div class="data">{msg.created_at.strftime('%d/%m/%Y %H:%M')}</div>
+                    <div>{limpar(msg.content)}</div>
+                    {anexos_html}
+                </div>
+                """
+
+        except Exception as e:
+            conteudo += f"<p>❌ Erro ao salvar canal {limpar(canal.name)}: {limpar(str(e))}</p>"
+
+        for thread in canal.threads:
+            conteudo += f"<h3 class='canal'>🧵 {limpar(thread.name)}</h3>"
 
             try:
-                async for msg in canal.history(limit=500, oldest_first=True):
+                async for msg in thread.history(limit=500, oldest_first=True):
                     anexos_html = ""
 
                     for anexo in msg.attachments:
@@ -420,16 +482,12 @@ async def executar_backup(manual=False, usuario=None):
 
                         if anexo.content_type and anexo.content_type.startswith("image/"):
                             anexos_html += f"""
-                            <div class="anexo">
-                                📷 <b>Imagem:</b> <a href="{url}">{nome}</a><br>
-                                <img src="{url}">
-                            </div>
+                            <p>📷 <a href="{url}">{nome}</a></p>
+                            <img src="{url}">
                             """
                         else:
                             anexos_html += f"""
-                            <div class="anexo">
-                                📎 <b>Arquivo:</b> <a href="{url}">{nome}</a>
-                            </div>
+                            <p>📎 <a href="{url}">{nome}</a></p>
                             """
 
                     conteudo += f"""
@@ -442,70 +500,33 @@ async def executar_backup(manual=False, usuario=None):
                     """
 
             except Exception as e:
-                conteudo += f"<p>❌ Erro ao salvar canal {limpar(canal.name)}: {limpar(str(e))}</p>"
+                conteudo += f"<p>❌ Erro ao salvar tópico {limpar(thread.name)}: {limpar(str(e))}</p>"
 
-            for thread in canal.threads:
-                conteudo += f"<h3 class='canal'>🧵 {limpar(thread.name)}</h3>"
+    conteudo += """
+    </body>
+    </html>
+    """
 
-                try:
-                    async for msg in thread.history(limit=500, oldest_first=True):
-                        anexos_html = ""
+    with open(nome_arquivo, "w", encoding="utf-8") as f:
+        f.write(conteudo)
 
-                        for anexo in msg.attachments:
-                            url = anexo.url
-                            nome = limpar(anexo.filename)
+    canal_backup = bot.get_channel(BACKUP_CHANNEL_ID)
 
-                            if anexo.content_type and anexo.content_type.startswith("image/"):
-                                anexos_html += f"""
-                                <div class="anexo">
-                                    📷 <b>Imagem:</b> <a href="{url}">{nome}</a><br>
-                                    <img src="{url}">
-                                </div>
-                                """
-                            else:
-                                anexos_html += f"""
-                                <div class="anexo">
-                                    📎 <b>Arquivo:</b> <a href="{url}">{nome}</a>
-                                </div>
-                                """
-
-                        conteudo += f"""
-                        <div class="msg">
-                            <div class="autor">{limpar(str(msg.author))}</div>
-                            <div class="data">{msg.created_at.strftime('%d/%m/%Y %H:%M')}</div>
-                            <div>{limpar(msg.content)}</div>
-                            {anexos_html}
-                        </div>
-                        """
-
-                except Exception as e:
-                    conteudo += f"<p>❌ Erro ao salvar tópico {limpar(thread.name)}: {limpar(str(e))}</p>"
-
-        conteudo += """
-        </body>
-        </html>
-        """
-
-        with open(nome_arquivo, "w", encoding="utf-8") as f:
-            f.write(conteudo)
-
-        canal_backup = bot.get_channel(BACKUP_CHANNEL_ID)
-
-        if canal_backup:
-            await canal_backup.send(
-                content=f"📦 Backup {'manual' if manual else 'diário'} completo de **{guild.name}**",
-                file=discord.File(nome_arquivo)
-            )
-
-        await enviar_log(
-            "Backup Executado",
-            f"📦 Servidor: `{guild.name}`\n"
-            f"🕒 Tipo: {'Manual' if manual else 'Automático'}\n"
-            f"👤 Executado por: {usuario.mention if usuario else 'Sistema automático'}"
+    if canal_backup:
+        await canal_backup.send(
+            content=f"📦 Backup {'manual' if manual else 'diário'} completo do servidor **DIC**",
+            file=discord.File(nome_arquivo)
         )
 
-        if os.path.exists(nome_arquivo):
-            os.remove(nome_arquivo)
+    await enviar_log(
+        "Backup Executado",
+        f"📦 Servidor: `{guild.name}`\n"
+        f"🕒 Tipo: {'Manual' if manual else 'Automático'}\n"
+        f"👤 Executado por: {usuario.mention if usuario else 'Sistema automático'}"
+    )
+
+    if os.path.exists(nome_arquivo):
+        os.remove(nome_arquivo)
 
 
 @tasks.loop(time=datetime.time(hour=0, minute=0, tzinfo=ZoneInfo("America/Sao_Paulo")))
@@ -777,20 +798,6 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
             )
 
 
-class PainelProcuradosView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="Novo Procurado",
-        emoji="➕",
-        style=discord.ButtonStyle.danger,
-        custom_id="novo_procurado_button"
-    )
-    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ProcuradoModal())
-
-
 class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
     rg = discord.ui.TextInput(label="RG do procurado", required=True)
     motivo = discord.ui.TextInput(
@@ -818,6 +825,22 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
                 )
                 return
 
+            autor_id = int(procurado.get("autor_id", 0))
+
+            if interaction.user.id != autor_id and not usuario_admin(interaction.user):
+                await interaction.followup.send(
+                    "❌ Você não pode retirar esse procurado. Apenas quem cadastrou ou um admin pode retirar.",
+                    ephemeral=True
+                )
+
+                await enviar_log(
+                    "Tentativa Negada de Retirar Procurado",
+                    f"👤 Usuário: {interaction.user.mention}\n"
+                    f"🆔 RG: `{procurado['rg']}`\n"
+                    f"⚠️ Sem permissão."
+                )
+                return
+
             canal_procurados = bot.get_channel(procurado.get("canal_id", PROCURADOS_CHANNEL_ID))
             historico = bot.get_channel(HISTORICO_PROCURADOS_ID)
 
@@ -825,13 +848,6 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
                 await interaction.followup.send(
                     "❌ Canal de histórico não encontrado. O post não foi apagado.",
                     ephemeral=True
-                )
-
-                await enviar_log(
-                    "Erro ao Retirar Procurado",
-                    f"❌ Canal de histórico não encontrado.\n"
-                    f"🆔 RG: `{procurado['rg']}`\n"
-                    f"⚠️ Post original não foi apagado."
                 )
                 return
 
@@ -880,9 +896,7 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
                     files=arquivos_historico
                 )
             else:
-                await historico.send(
-                    content=texto_historico
-                )
+                await historico.send(content=texto_historico)
 
             if mensagem_original:
                 try:
@@ -932,148 +946,378 @@ class RetirarProcuradoModal(discord.ui.Modal, title="Retirar Procurado"):
             )
 
 
-# =========================
-# EVENTOS
-# =========================
+class PainelProcuradosView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
 
-@bot.event
-async def on_ready():
-    global views_adicionadas
+    @discord.ui.button(
+        label="Novo Procurado",
+        emoji="➕",
+        style=discord.ButtonStyle.danger,
+        custom_id="novo_procurado_button"
+    )
+    async def novo(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ProcuradoModal())
 
-    await tree.sync()
+    @discord.ui.button(
+        label="Lista de Procurados",
+        emoji="📋",
+        style=discord.ButtonStyle.primary,
+        custom_id="lista_procurados_button"
+    )
+    async def lista(self, interaction: discord.Interaction, button: discord.ui.Button):
+        lista = carregar_procurados()
+        ativos = [p for p in lista if p.get("status", "ativo") == "ativo"]
 
-    if not backup_diario.is_running():
-        backup_diario.start()
-
-    if not views_adicionadas:
-        bot.add_view(CriarMesaView())
-        bot.add_view(PainelProcuradosView())
-        bot.add_view(FecharMesaView())
-        views_adicionadas = True
-
-    print(f"Bot online como {bot.user}")
-    print("Comandos sincronizados!")
-    print("Backup diário ativado!")
-
-
-@tree.error
-async def on_app_command_error(interaction: discord.Interaction, error):
-    try:
-        await enviar_log(
-            "Erro no Bot",
-            f"👤 Usuário: {interaction.user.mention if interaction.user else 'N/A'}\n"
-            f"⚠️ Erro: `{error}`"
-        )
-
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                "❌ Ocorreu um erro ao executar esse comando.",
-                ephemeral=True
-            )
-        else:
+        if not ativos:
             await interaction.response.send_message(
-                "❌ Ocorreu um erro ao executar esse comando.",
+                "📂 Nenhum procurado ativo cadastrado.",
+                ephemeral=True
+            )
+            return
+
+        texto = "🚨 **Lista de Procurados Ativos**\n\n"
+
+        for p in ativos:
+            texto += f"👤 **{p['nome']}** | RG: `{p['rg']}`\n"
+
+        await interaction.response.send_message(texto, ephemeral=True)
+
+    @discord.ui.button(
+        label="Retirar Procurado",
+        emoji="❌",
+        style=discord.ButtonStyle.secondary,
+        custom_id="retirar_procurado_button"
+    )
+    async def retirar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(RetirarProcuradoModal())
+
+
+# =========================
+# PAINEL ADMIN
+# =========================
+
+class AlertaModal(discord.ui.Modal, title="Enviar Alerta"):
+    canal_id = discord.ui.TextInput(
+        label="ID do canal onde o alerta será enviado",
+        placeholder="Exemplo: 123456789012345678",
+        required=True
+    )
+
+    titulo = discord.ui.TextInput(
+        label="Título do alerta",
+        placeholder="Exemplo: Operação urgente",
+        required=True,
+        max_length=100
+    )
+
+    mensagem = discord.ui.TextInput(
+        label="Mensagem do alerta",
+        placeholder="Digite o aviso que será enviado...",
+        style=discord.TextStyle.paragraph,
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if not usuario_admin(interaction.user):
+            await interaction.followup.send(
+                "❌ Você não tem permissão para enviar alertas.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            canal = bot.get_channel(int(self.canal_id.value))
+
+            if canal is None:
+                canal = await bot.fetch_channel(int(self.canal_id.value))
+
+            embed = discord.Embed(
+                title=f"⚠️ {self.titulo.value}",
+                description=self.mensagem.value,
+                color=0xFF0000
+            )
+
+            embed.set_footer(
+                text=f"Alerta enviado por {interaction.user.display_name}"
+            )
+
+            await canal.send(
+                content="@everyone",
+                embed=embed
+            )
+
+            await enviar_log(
+                "Alerta Enviado",
+                f"👤 Enviado por: {interaction.user.mention}\n"
+                f"📢 Canal: {canal.mention}\n"
+                f"⚠️ Título: `{self.titulo.value}`"
+            )
+
+            await interaction.followup.send(
+                f"✅ Alerta enviado com sucesso em {canal.mention}.",
                 ephemeral=True
             )
 
-    except Exception:
-        pass
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao enviar alerta: `{e}`",
+                ephemeral=True
+            )
+
+            await enviar_log(
+                "Erro ao Enviar Alerta",
+                f"👤 Usuário: {interaction.user.mention}\n"
+                f"⚠️ Erro: `{e}`"
+            )
 
 
-# =========================
-# COMANDOS
-# =========================
-
-@tree.command(name="painel", description="Painel de criação de mesas")
-async def painel(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📂 Central de Mesas Investigativas",
-        description=(
-            "Seja bem-vindo à **central de criação de mesas da DIC**.\n\n"
-            "Caso deseje iniciar uma investigação, clique no botão abaixo.\n\n"
-            "🕵️‍♂️ **Criar Mesa** — Cria uma mesa privada contendo todos os tópicos necessários.\n\n"
-            "Todas as informações enviadas ficarão registradas para análise da equipe."
-        ),
-        color=0x2B2D31
+class ReabrirMesaModal(discord.ui.Modal, title="Reabrir Mesa"):
+    canal_id = discord.ui.TextInput(
+        label="ID do canal da mesa fechada",
+        placeholder="Cole o ID do canal da mesa fechada",
+        required=True
     )
 
-    await interaction.response.send_message(
-        embed=embed,
-        view=CriarMesaView()
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        if not usuario_admin(interaction.user):
+            await interaction.followup.send(
+                "❌ Você não tem permissão para reabrir mesas.",
+                ephemeral=True
+            )
+            return
+
+        try:
+            canal = bot.get_channel(int(self.canal_id.value))
+
+            if canal is None:
+                canal = await bot.fetch_channel(int(self.canal_id.value))
+
+            categoria_abertas = interaction.guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
+
+            if categoria_abertas is None:
+                await interaction.followup.send(
+                    "❌ Categoria de mesas abertas não encontrada.",
+                    ephemeral=True
+                )
+                return
+
+            novo_nome = limpar_nome_mesa_fechada(canal.name)
+
+            await canal.edit(
+                name=novo_nome,
+                category=categoria_abertas
+            )
+
+            await canal.send(
+                f"🔓 **Mesa reaberta por {interaction.user.mention} e movida para mesas abertas.**"
+            )
+
+            await enviar_log(
+                "Mesa Reaberta pelo Painel Admin",
+                f"👤 Reaberta por: {interaction.user.mention}\n"
+                f"📂 Mesa: {canal.mention}\n"
+                f"📁 Movida para: `{CATEGORIA_MESAS_ABERTAS_ID}`"
+            )
+
+            await interaction.followup.send(
+                f"✅ Mesa reaberta com sucesso: {canal.mention}",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao reabrir mesa: `{e}`",
+                ephemeral=True
+            )
+
+
+class PainelAdminView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Enviar Alerta",
+        emoji="⚠️",
+        style=discord.ButtonStyle.danger,
+        custom_id="admin_enviar_alerta"
     )
+    async def enviar_alerta(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not usuario_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para usar o painel admin.",
+                ephemeral=True
+            )
+            return
 
-    await enviar_log(
-        "Painel de Mesas Criado",
-        f"👤 Criado por: {interaction.user.mention}\n"
-        f"📍 Canal: {interaction.channel.mention}"
+        await interaction.response.send_modal(AlertaModal())
+
+    @discord.ui.button(
+        label="Fazer Backup",
+        emoji="📦",
+        style=discord.ButtonStyle.primary,
+        custom_id="admin_fazer_backup"
     )
+    async def fazer_backup(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not usuario_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para fazer backup.",
+                ephemeral=True
+            )
+            return
 
-
-@tree.command(name="testebackup", description="Executar backup agora")
-async def testebackup(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        "📦 Executando backup...",
-        ephemeral=True
-    )
-
-    await executar_backup(manual=True, usuario=interaction.user)
-
-
-@tree.command(name="painelprocurados", description="Criar painel de procurados")
-async def painelprocurados(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🚨 Sistema de Procurados - DIC",
-        description="Clique no botão abaixo para cadastrar um novo procurado.",
-        color=0x8B0000
-    )
-
-    await interaction.response.send_message(
-        embed=embed,
-        view=PainelProcuradosView()
-    )
-
-    await enviar_log(
-        "Painel de Procurados Criado",
-        f"👤 Criado por: {interaction.user.mention}\n"
-        f"📍 Canal: {interaction.channel.mention}"
-    )
-
-
-@tree.command(name="listarprocurados", description="Lista os procurados ativos cadastrados")
-async def listarprocurados(interaction: discord.Interaction):
-    lista = carregar_procurados()
-    ativos = [p for p in lista if p.get("status", "ativo") == "ativo"]
-
-    if not ativos:
         await interaction.response.send_message(
-            "📂 Nenhum procurado ativo cadastrado.",
+            "📦 Backup iniciado pelo painel admin...",
             ephemeral=True
         )
 
         await enviar_log(
-            "Listagem de Procurados",
-            f"👤 Solicitado por: {interaction.user.mention}\n"
-            f"📂 Resultado: Nenhum procurado ativo cadastrado."
+            "Backup Iniciado pelo Painel Admin",
+            f"👤 Iniciado por: {interaction.user.mention}"
         )
-        return
 
-    texto = "🔍 **Lista de Procurados Ativos**\n\n"
+        await executar_backup(manual=True, usuario=interaction.user)
 
-    for p in ativos:
-        texto += f"👤 **{p['nome']}** | RG: `{p['rg']}`\n"
-
-    await interaction.response.send_message(texto, ephemeral=True)
-
-    await enviar_log(
-        "Listagem de Procurados",
-        f"👤 Solicitado por: {interaction.user.mention}\n"
-        f"📊 Total ativo listado: `{len(ativos)}`"
+    @discord.ui.button(
+        label="Reabrir Mesa",
+        emoji="🔓",
+        style=discord.ButtonStyle.success,
+        custom_id="admin_reabrir_mesa"
     )
+    async def reabrir_mesa(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not usuario_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para reabrir mesas.",
+                ephemeral=True
+            )
+            return
 
+        await interaction.response.send_modal(ReabrirMesaModal())
 
-@tree.command(name="retirarprocurado", description="Retira um procurado pelo RG e motivo")
-async def retirarprocurado(interaction: discord.Interaction):
-    await interaction.response.send_modal(RetirarProcuradoModal())
+    @discord.ui.button(
+        label="Ver Histórico",
+        emoji="📂",
+        style=discord.ButtonStyle.secondary,
+        custom_id="admin_ver_historico"
+    )
+    async def ver_historico(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not usuario_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para ver o histórico.",
+                ephemeral=True
+            )
+            return
+
+        historico = bot.get_channel(HISTORICO_PROCURADOS_ID)
+
+        if historico is None:
+            await interaction.response.send_message(
+                "❌ Canal de histórico não encontrado.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            f"📂 **Canal de Histórico:** {historico.mention}",
+            ephemeral=True
+        )
+
+        await enviar_log(
+            "Histórico Acessado pelo Painel Admin",
+            f"👤 Acessado por: {interaction.user.mention}\n"
+            f"📂 Canal: {historico.mention}"
+        )
+
+    @discord.ui.button(
+        label="Estatísticas",
+        emoji="📊",
+        style=discord.ButtonStyle.secondary,
+        custom_id="admin_estatisticas"
+    )
+    async def estatisticas(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not usuario_admin(interaction.user):
+            await interaction.response.send_message(
+                "❌ Você não tem permissão para ver estatísticas.",
+                ephemeral=True
+            )
+            return
+
+        guild = interaction.guild
+        lista = carregar_procurados()
+
+        mesas_abertas = 0
+        mesas_fechadas = 0
+
+        for canal in guild.text_channels:
+            if canal.category_id == CATEGORIA_MESAS_ABERTAS_ID:
+                mesas_abertas += 1
+
+            if canal.category_id == CATEGORIA_MESAS_FECHADAS_ID:
+                mesas_fechadas += 1
+
+        procurados_ativos = len([
+            p for p in lista
+            if p.get("status", "ativo") == "ativo"
+        ])
+
+        procurados_retirados = len([
+            p for p in lista
+            if p.get("status") == "retirado"
+        ])
+
+        embed = discord.Embed(
+            title="📊 Estatísticas da DIC",
+            color=0x2B2D31
+        )
+
+        embed.add_field(
+            name="📂 Mesas Abertas",
+            value=str(mesas_abertas),
+            inline=True
+        )
+
+        embed.add_field(
+            name="🔒 Mesas Fechadas",
+            value=str(mesas_fechadas),
+            inline=True
+        )
+
+        embed.add_field(
+            name="🚨 Procurados Ativos",
+            value=str(procurados_ativos),
+            inline=True
+        )
+
+        embed.add_field(
+            name="📂 Procurados Retirados",
+            value=str(procurados_retirados),
+            inline=True
+        )
+
+        embed.add_field(
+            name="👥 Membros no servidor",
+            value=str(guild.member_count),
+            inline=True
+        )
+
+        embed.set_footer(
+            text=f"Solicitado por {interaction.user.display_name}"
+        )
+
+        await interaction.response.send_message(
+            embed=embed,
+            ephemeral=True
+        )
+
+        await enviar_log(
+            "Estatísticas Consultadas",
+            f"👤 Consultado por: {interaction.user.mention}"
+        )
+
 
 # =========================
 # COMANDOS EXTRAS
@@ -1107,8 +1351,8 @@ async def ajuda(interaction: discord.Interaction):
 `/procuradoinfo` — Busca um procurado pelo RG.
 `/retirarprocurado` — Retira procurado e manda para histórico.
 
-📦 **Backup**
-`/testebackup` — Executa backup na hora.
+👮 **Admin**
+`/paineladmin` — Cria o painel administrativo.
 """
 
     await interaction.response.send_message(texto, ephemeral=True)
@@ -1555,4 +1799,180 @@ async def procuradoinfo(interaction: discord.Interaction, rg: str):
         f"👤 Consultado por: {interaction.user.mention}\n"
         f"🆔 RG: `{rg}`"
     )
+
+
+# =========================
+# EVENTOS
+# =========================
+
+@bot.event
+async def on_ready():
+    global views_adicionadas
+
+    await tree.sync()
+
+    if not backup_diario.is_running():
+        backup_diario.start()
+
+    if not views_adicionadas:
+        bot.add_view(CriarMesaView())
+        bot.add_view(PainelProcuradosView())
+        bot.add_view(FecharMesaView())
+        bot.add_view(PainelAdminView())
+        views_adicionadas = True
+
+    print(f"Bot online como {bot.user}")
+    print("Comandos sincronizados!")
+    print("Backup diário ativado!")
+
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    try:
+        await enviar_log(
+            "Erro no Bot",
+            f"👤 Usuário: {interaction.user.mention if interaction.user else 'N/A'}\n"
+            f"⚠️ Erro: `{error}`"
+        )
+
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "❌ Ocorreu um erro ao executar esse comando.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ Ocorreu um erro ao executar esse comando.",
+                ephemeral=True
+            )
+
+    except Exception:
+        pass
+
+
+# =========================
+# COMANDOS PRINCIPAIS
+# =========================
+
+@tree.command(name="painel", description="Painel de criação de mesas")
+async def painel(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📂 Central de Mesas Investigativas",
+        description=(
+            "Seja bem-vindo à **central de criação de mesas da DIC**.\n\n"
+            "Caso deseje iniciar uma investigação, clique no botão abaixo.\n\n"
+            "🕵️‍♂️ **Criar Mesa** — Cria uma mesa privada contendo todos os tópicos necessários.\n\n"
+            "Todas as informações enviadas ficarão registradas para análise da equipe."
+        ),
+        color=0x2B2D31
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=CriarMesaView()
+    )
+
+    await enviar_log(
+        "Painel de Mesas Criado",
+        f"👤 Criado por: {interaction.user.mention}\n"
+        f"📍 Canal: {interaction.channel.mention}"
+    )
+
+
+@tree.command(name="painelprocurados", description="Criar painel de procurados")
+async def painelprocurados(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🚨 Sistema de Procurados - DIC",
+        description=(
+            "Utilize os botões abaixo para gerenciar procurados.\n\n"
+            "➕ **Novo Procurado** — Cadastrar um novo procurado.\n"
+            "📋 **Lista de Procurados** — Ver procurados ativos.\n"
+            "❌ **Retirar Procurado** — Retirar um procurado pelo RG."
+        ),
+        color=0x8B0000
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=PainelProcuradosView()
+    )
+
+    await enviar_log(
+        "Painel de Procurados Criado",
+        f"👤 Criado por: {interaction.user.mention}\n"
+        f"📍 Canal: {interaction.channel.mention}"
+    )
+
+
+@tree.command(name="listarprocurados", description="Lista os procurados ativos cadastrados")
+async def listarprocurados(interaction: discord.Interaction):
+    lista = carregar_procurados()
+    ativos = [p for p in lista if p.get("status", "ativo") == "ativo"]
+
+    if not ativos:
+        await interaction.response.send_message(
+            "📂 Nenhum procurado ativo cadastrado.",
+            ephemeral=True
+        )
+
+        await enviar_log(
+            "Listagem de Procurados",
+            f"👤 Solicitado por: {interaction.user.mention}\n"
+            f"📂 Resultado: Nenhum procurado ativo cadastrado."
+        )
+        return
+
+    texto = "🔍 **Lista de Procurados Ativos**\n\n"
+
+    for p in ativos:
+        texto += f"👤 **{p['nome']}** | RG: `{p['rg']}`\n"
+
+    await interaction.response.send_message(texto, ephemeral=True)
+
+    await enviar_log(
+        "Listagem de Procurados",
+        f"👤 Solicitado por: {interaction.user.mention}\n"
+        f"📊 Total ativo listado: `{len(ativos)}`"
+    )
+
+
+@tree.command(name="retirarprocurado", description="Retira um procurado pelo RG e motivo")
+async def retirarprocurado(interaction: discord.Interaction):
+    await interaction.response.send_modal(RetirarProcuradoModal())
+
+
+@tree.command(name="paineladmin", description="Cria o painel administrativo da DIC")
+async def paineladmin(interaction: discord.Interaction):
+    if not usuario_admin(interaction.user):
+        await interaction.response.send_message(
+            "❌ Você não tem permissão para criar o painel admin.",
+            ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(
+        title="👮 Painel Administrativo — DIC",
+        description=(
+            "Central de controle da administração.\n\n"
+            "⚠️ **Enviar Alerta** — Envia um aviso em um canal escolhido.\n"
+            "📦 **Fazer Backup** — Executa backup imediato do servidor DIC.\n"
+            "🔓 **Reabrir Mesa** — Move uma mesa fechada para abertas.\n"
+            "📂 **Ver Histórico** — Mostra o canal de histórico.\n"
+            "📊 **Estatísticas** — Mostra números gerais da DIC."
+        ),
+        color=0x2B2D31
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=PainelAdminView()
+    )
+
+    await enviar_log(
+        "Painel Admin Criado",
+        f"👤 Criado por: {interaction.user.mention}\n"
+        f"📍 Canal: {interaction.channel.mention}"
+    )
+
+
 bot.run(TOKEN)
