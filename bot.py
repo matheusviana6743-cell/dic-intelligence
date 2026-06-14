@@ -35,14 +35,14 @@ CARGOS_ADMIN_IDS = [
     1490200390426165290   # Investigador
 ]
 
-BACKUP_CHANNEL_ID = 1515165673276440677
+BACKUP_CHANNEL_ID = 1514811262813339648
 
-PROCURADOS_CHANNEL_ID = 1490200533980545097
-HISTORICO_PROCURADOS_ID = 1490200536207855857
-LOGS_CHANNEL_ID = 1490205503228477610
+PROCURADOS_CHANNEL_ID = 1515040708971597894
+HISTORICO_PROCURADOS_ID = 1515052449776533745
+LOGS_CHANNEL_ID = 1515052409532055662
 
-CATEGORIA_MESAS_ABERTAS_ID = 1490200456855552192
-CATEGORIA_MESAS_FECHADAS_ID = 1515165416815722586
+CATEGORIA_MESAS_ABERTAS_ID = 1515079970722938920
+CATEGORIA_MESAS_FECHADAS_ID = 1515052497025372160
 
 ARQUIVO_PROCURADOS = "procurados.json"
 
@@ -94,6 +94,43 @@ def nome_seguro(texto):
     return texto[:45]
 
 
+def normalizar_busca(texto):
+    texto = str(texto or "")
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    texto = texto.lower().strip()
+    return texto
+
+
+def contem_termo(texto, termo):
+    return normalizar_busca(termo) in normalizar_busca(texto)
+
+
+def cortar_texto(texto, limite=170):
+    texto = str(texto or "").replace("\n", " ").strip()
+
+    if len(texto) <= limite:
+        return texto
+
+    return texto[:limite] + "..."
+
+
+def dividir_texto(texto, limite=1800):
+    partes = []
+    atual = ""
+
+    for linha in texto.split("\n"):
+        if len(atual) + len(linha) + 1 > limite:
+            partes.append(atual)
+            atual = linha + "\n"
+        else:
+            atual += linha + "\n"
+
+    if atual.strip():
+        partes.append(atual)
+
+    return partes
+
+
 def carregar_procurados():
     if not os.path.exists(ARQUIVO_PROCURADOS):
         return []
@@ -131,6 +168,13 @@ def usuario_admin(membro):
 
 
 def limpar_nome_mesa_fechada(nome):
+    nome = nome.replace("🔒 ┃", "")
+    nome = nome.replace("🔒┃", "")
+    nome = nome.replace("fechada-", "")
+    return nome.strip()
+
+
+def remover_prefixo_fechada(nome):
     nome = nome.replace("🔒 ┃", "")
     nome = nome.replace("🔒┃", "")
     nome = nome.replace("fechada-", "")
@@ -597,18 +641,21 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
             )
 
             await canal.send(
-                f"🚨 **Cadastro de Procurado**\n\n"
-                f"👤 Nome: **{self.nome.value}**\n"
-                f"🆔 RG: **{self.rg.value}**\n\n"
-                f"📸 Envie até **2 fotos** neste canal.\n"
-                f"Depois clique em **✅ Finalizar Cadastro**.\n\n"
-                f"⚠️ Este canal é provisório e será apagado após finalizar ou cancelar.",
+                f"🚨 **Cadastro de Procurado — DIC**\n\n"
+                f"👤 **Nome:** {self.nome.value}\n"
+                f"🆔 **RG:** {self.rg.value}\n\n"
+                f"📸 **Envio obrigatório de imagens:**\n"
+                f"1️⃣ **Foto do indivíduo**\n"
+                f"2️⃣ **Foto do RG / identificação**\n\n"
+                f"Após enviar as duas imagens solicitadas, clique em **✅ Finalizar Cadastro**.\n\n"
+                f"⚠️ Este canal é provisório e será apagado após finalizar ou cancelar o cadastro.",
                 view=FinalizarProcuradoView(
                     self.nome.value,
                     self.rg.value,
                     self.ultimo.value,
                     self.crimes.value,
-                    interaction.user.id
+                    interaction.user.id,
+                    interaction.user.name
                 )
             )
 
@@ -622,7 +669,7 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
             )
 
             await interaction.followup.send(
-                f"✅ Canal provisório criado para anexar fotos: {canal.mention}",
+                f"✅ Canal provisório criado para anexar as imagens: {canal.mention}",
                 ephemeral=True
             )
 
@@ -640,13 +687,14 @@ class ProcuradoModal(discord.ui.Modal, title="Cadastrar Procurado"):
 
 
 class FinalizarProcuradoView(discord.ui.View):
-    def __init__(self, nome, rg, ultimo, crimes, autor_id):
+    def __init__(self, nome, rg, ultimo, crimes, autor_id, autor_nome):
         super().__init__(timeout=None)
         self.nome = nome
         self.rg = rg
         self.ultimo = ultimo
         self.crimes = crimes
         self.autor_id = autor_id
+        self.autor_nome = autor_nome
 
     @discord.ui.button(
         label="Finalizar Cadastro",
@@ -713,8 +761,8 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
                 "rg": self.rg,
                 "ultimo": self.ultimo,
                 "crimes": self.crimes,
-                "autor": interaction.user.name,
-                "autor_id": interaction.user.id,
+                "autor": self.autor_nome,
+                "autor_id": self.autor_id,
                 "mensagem_id": mensagem.id,
                 "canal_id": PROCURADOS_CHANNEL_ID,
                 "status": "ativo"
@@ -725,8 +773,8 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
                 "Procurado Cadastrado",
                 f"👤 Nome: `{self.nome}`\n"
                 f"🆔 RG: `{self.rg}`\n"
-                f"👮 Responsável: {interaction.user.mention}\n"
-                f"📸 Fotos anexadas: `{len(anexos)}`\n"
+                f"👮 Responsável: <@{self.autor_id}>\n"
+                f"📸 Imagens anexadas: `{len(anexos)}`\n"
                 f"📌 Mensagem: {mensagem.jump_url}\n"
                 f"🗑️ Canal provisório apagado após finalizar."
             )
@@ -784,12 +832,8 @@ As investigações apontam seu envolvimento em atividades criminosas, havendo ma
 
             try:
                 await interaction.channel.delete()
-            except Exception as e:
-                await enviar_log(
-                    "Erro ao Apagar Canal Provisório",
-                    f"📂 Canal: {interaction.channel.mention}\n"
-                    f"⚠️ Erro: `{e}`"
-                )
+            except Exception:
+                pass
 
         except Exception as e:
             await interaction.followup.send(
@@ -991,6 +1035,285 @@ class PainelProcuradosView(discord.ui.View):
     )
     async def retirar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(RetirarProcuradoModal())
+
+
+# =========================
+# SISTEMA DE TICKET DE CONSULTA
+# =========================
+
+async def gerar_resultado_consulta(guild, termo, ignorar_canal_id=None):
+    mesas = []
+    procurados = []
+    mensagens = []
+    arquivos = []
+
+    categorias_busca = [
+        CATEGORIA_MESAS_ABERTAS_ID,
+        CATEGORIA_MESAS_FECHADAS_ID
+    ]
+
+    canais_especiais = [
+        PROCURADOS_CHANNEL_ID,
+        HISTORICO_PROCURADOS_ID
+    ]
+
+    for canal in guild.text_channels:
+        if canal.id == ignorar_canal_id:
+            continue
+
+        if canal.category_id in categorias_busca:
+            if contem_termo(canal.name, termo):
+                status = "Aberta" if canal.category_id == CATEGORIA_MESAS_ABERTAS_ID else "Fechada"
+                mesas.append(f"• {canal.mention} — `{status}`")
+
+        if len(mesas) >= 10:
+            break
+
+    lista = carregar_procurados()
+
+    for p in lista:
+        texto_base = (
+            f"{p.get('nome', '')} "
+            f"{p.get('rg', '')} "
+            f"{p.get('ultimo', '')} "
+            f"{p.get('crimes', '')} "
+            f"{p.get('status', '')}"
+        )
+
+        if contem_termo(texto_base, termo):
+            status = p.get("status", "ativo")
+            procurados.append(
+                f"• **{p.get('nome')}** | RG: `{p.get('rg')}` | Status: `{status}`"
+            )
+
+        if len(procurados) >= 10:
+            break
+
+    canais_para_buscar = []
+
+    for canal in guild.text_channels:
+        if canal.id == ignorar_canal_id:
+            continue
+
+        if canal.category_id in categorias_busca or canal.id in canais_especiais:
+            canais_para_buscar.append(canal)
+
+    for canal in canais_para_buscar:
+        if len(mensagens) >= 10 and len(arquivos) >= 10:
+            break
+
+        try:
+            async for msg in canal.history(limit=100, oldest_first=False):
+                if msg.content and contem_termo(msg.content, termo) and len(mensagens) < 10:
+                    mensagens.append(
+                        f"• {canal.mention} — [abrir mensagem]({msg.jump_url})\n"
+                        f"  Trecho: `{cortar_texto(msg.content)}`"
+                    )
+
+                for anexo in msg.attachments:
+                    if contem_termo(anexo.filename, termo) and len(arquivos) < 10:
+                        arquivos.append(
+                            f"• {canal.mention} — [{anexo.filename}]({anexo.url})"
+                        )
+
+        except Exception:
+            pass
+
+        for thread in canal.threads:
+            if len(mensagens) >= 10 and len(arquivos) >= 10:
+                break
+
+            try:
+                if contem_termo(thread.name, termo) and len(mensagens) < 10:
+                    mensagens.append(f"• 🧵 **Thread encontrada:** {thread.mention}")
+
+                async for msg in thread.history(limit=100, oldest_first=False):
+                    if msg.content and contem_termo(msg.content, termo) and len(mensagens) < 10:
+                        mensagens.append(
+                            f"• {thread.mention} — [abrir mensagem]({msg.jump_url})\n"
+                            f"  Trecho: `{cortar_texto(msg.content)}`"
+                        )
+
+                    for anexo in msg.attachments:
+                        if contem_termo(anexo.filename, termo) and len(arquivos) < 10:
+                            arquivos.append(
+                                f"• {thread.mention} — [{anexo.filename}]({anexo.url})"
+                            )
+
+            except Exception:
+                pass
+
+    texto = f"""
+🔎 **CONSULTA INVESTIGATIVA — DIC**
+
+🔍 **Termo pesquisado:** `{termo}`
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+📂 **Mesas encontradas**
+{chr(10).join(mesas) if mesas else "Nenhuma mesa encontrada."}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+🚨 **Procurados encontrados**
+{chr(10).join(procurados) if procurados else "Nenhum procurado encontrado."}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+💬 **Mensagens encontradas**
+{chr(10).join(mensagens) if mensagens else "Nenhuma mensagem encontrada."}
+
+━━━━━━━━━━━━━━━━━━━━━━━
+
+📎 **Arquivos encontrados**
+{chr(10).join(arquivos) if arquivos else "Nenhum arquivo encontrado."}
+"""
+
+    return texto
+
+
+class FecharConsultaView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Fechar Ticket",
+        emoji="🔒",
+        style=discord.ButtonStyle.danger,
+        custom_id="fechar_ticket_consulta_button"
+    )
+    async def fechar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message(
+            "🔒 Ticket de consulta será apagado em 5 segundos...",
+            ephemeral=True
+        )
+
+        await enviar_log(
+            "Ticket de Consulta Fechado",
+            f"👤 Fechado por: {interaction.user.mention}\n"
+            f"📂 Canal: {interaction.channel.mention}\n"
+            f"🗑️ Canal provisório apagado."
+        )
+
+        await asyncio.sleep(5)
+
+        try:
+            await interaction.channel.delete()
+        except Exception:
+            pass
+
+
+class ConsultaModal(discord.ui.Modal, title="Ticket de Consulta"):
+    termo = discord.ui.TextInput(
+        label="O que deseja consultar?",
+        placeholder="Exemplo: Baiano, 12345, Olimpo, Fazenda...",
+        required=True,
+        max_length=80
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        try:
+            guild = interaction.guild
+            cargos_equipe = obter_cargos_equipe(guild)
+
+            categoria = interaction.channel.category
+
+            if categoria is None:
+                categoria = guild.get_channel(CATEGORIA_MESAS_ABERTAS_ID)
+
+            if categoria is None:
+                await interaction.followup.send(
+                    "❌ Categoria não encontrada para criar o ticket.",
+                    ephemeral=True
+                )
+                return
+
+            nome_ticket = f"🔎┃consulta-{nome_seguro(self.termo.value)}"
+
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                interaction.user: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    attach_files=True,
+                    read_message_history=True
+                )
+            }
+
+            for cargo in cargos_equipe:
+                overwrites[cargo] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    attach_files=True,
+                    read_message_history=True
+                )
+
+            canal = await guild.create_text_channel(
+                name=nome_ticket,
+                category=categoria,
+                overwrites=overwrites
+            )
+
+            await interaction.followup.send(
+                f"✅ Ticket de consulta criado: {canal.mention}",
+                ephemeral=True
+            )
+
+            await canal.send(
+                f"🔎 **Ticket de Consulta criado por {interaction.user.mention}**\n"
+                f"🔍 **Termo pesquisado:** `{self.termo.value}`\n\n"
+                f"⏳ Realizando consulta, aguarde..."
+            )
+
+            resultado = await gerar_resultado_consulta(
+                guild,
+                self.termo.value,
+                ignorar_canal_id=canal.id
+            )
+
+            resultado = f"👤 **Solicitado por:** {interaction.user.mention}\n" + resultado
+            partes = dividir_texto(resultado)
+
+            primeira = True
+
+            for parte in partes:
+                if primeira:
+                    await canal.send(
+                        content=parte,
+                        view=FecharConsultaView()
+                    )
+                    primeira = False
+                else:
+                    await canal.send(content=parte)
+
+            await enviar_log(
+                "Ticket de Consulta Criado",
+                f"👤 Criado por: {interaction.user.mention}\n"
+                f"🔍 Termo: `{self.termo.value}`\n"
+                f"📂 Ticket: {canal.mention}"
+            )
+
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Erro ao criar ticket de consulta: `{e}`",
+                ephemeral=True
+            )
+
+
+class PainelConsultaView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Abrir Ticket de Consulta",
+        emoji="🔎",
+        style=discord.ButtonStyle.primary,
+        custom_id="abrir_ticket_consulta_button"
+    )
+    async def abrir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ConsultaModal())
 
 
 # =========================
@@ -1274,35 +1597,11 @@ class PainelAdminView(discord.ui.View):
             color=0x2B2D31
         )
 
-        embed.add_field(
-            name="📂 Mesas Abertas",
-            value=str(mesas_abertas),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🔒 Mesas Fechadas",
-            value=str(mesas_fechadas),
-            inline=True
-        )
-
-        embed.add_field(
-            name="🚨 Procurados Ativos",
-            value=str(procurados_ativos),
-            inline=True
-        )
-
-        embed.add_field(
-            name="📂 Procurados Retirados",
-            value=str(procurados_retirados),
-            inline=True
-        )
-
-        embed.add_field(
-            name="👥 Membros no servidor",
-            value=str(guild.member_count),
-            inline=True
-        )
+        embed.add_field(name="📂 Mesas Abertas", value=str(mesas_abertas), inline=True)
+        embed.add_field(name="🔒 Mesas Fechadas", value=str(mesas_fechadas), inline=True)
+        embed.add_field(name="🚨 Procurados Ativos", value=str(procurados_ativos), inline=True)
+        embed.add_field(name="📂 Procurados Retirados", value=str(procurados_retirados), inline=True)
+        embed.add_field(name="👥 Membros no servidor", value=str(guild.member_count), inline=True)
 
         embed.set_footer(
             text=f"Solicitado por {interaction.user.display_name}"
@@ -1322,13 +1621,6 @@ class PainelAdminView(discord.ui.View):
 # =========================
 # COMANDOS EXTRAS
 # =========================
-
-def remover_prefixo_fechada(nome):
-    nome = nome.replace("🔒 ┃", "")
-    nome = nome.replace("🔒┃", "")
-    nome = nome.replace("fechada-", "")
-    return nome
-
 
 @tree.command(name="ajuda", description="Mostra todos os comandos do bot")
 async def ajuda(interaction: discord.Interaction):
@@ -1350,6 +1642,9 @@ async def ajuda(interaction: discord.Interaction):
 `/listarprocurados` — Lista procurados ativos.
 `/procuradoinfo` — Busca um procurado pelo RG.
 `/retirarprocurado` — Retira procurado e manda para histórico.
+
+🔎 **Consulta**
+`/painelconsulta` — Cria painel para abrir ticket de consulta.
 
 👮 **Admin**
 `/paineladmin` — Cria o painel administrativo.
@@ -1606,7 +1901,7 @@ async def relatorio(interaction: discord.Interaction, canal: discord.TextChannel
 
     try:
         data = datetime.datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%d-%m-%Y_%H-%M")
-        nome_arquivo = f"relatorio-{canal.name}-{data}.html".replace(" ", "-")
+        nome_arquivo = f"relatorio-{nome_seguro(canal.name)}-{data}.html".replace(" ", "-")
 
         conteudo = f"""
         <html>
@@ -1802,55 +2097,6 @@ async def procuradoinfo(interaction: discord.Interaction, rg: str):
 
 
 # =========================
-# EVENTOS
-# =========================
-
-@bot.event
-async def on_ready():
-    global views_adicionadas
-
-    await tree.sync()
-
-    if not backup_diario.is_running():
-        backup_diario.start()
-
-    if not views_adicionadas:
-        bot.add_view(CriarMesaView())
-        bot.add_view(PainelProcuradosView())
-        bot.add_view(FecharMesaView())
-        bot.add_view(PainelAdminView())
-        views_adicionadas = True
-
-    print(f"Bot online como {bot.user}")
-    print("Comandos sincronizados!")
-    print("Backup diário ativado!")
-
-
-@tree.error
-async def on_app_command_error(interaction: discord.Interaction, error):
-    try:
-        await enviar_log(
-            "Erro no Bot",
-            f"👤 Usuário: {interaction.user.mention if interaction.user else 'N/A'}\n"
-            f"⚠️ Erro: `{error}`"
-        )
-
-        if interaction.response.is_done():
-            await interaction.followup.send(
-                "❌ Ocorreu um erro ao executar esse comando.",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                "❌ Ocorreu um erro ao executar esse comando.",
-                ephemeral=True
-            )
-
-    except Exception:
-        pass
-
-
-# =========================
 # COMANDOS PRINCIPAIS
 # =========================
 
@@ -1899,6 +2145,30 @@ async def painelprocurados(interaction: discord.Interaction):
 
     await enviar_log(
         "Painel de Procurados Criado",
+        f"👤 Criado por: {interaction.user.mention}\n"
+        f"📍 Canal: {interaction.channel.mention}"
+    )
+
+
+@tree.command(name="painelconsulta", description="Cria o painel de ticket de consulta")
+async def painelconsulta(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="🔎 Ticket de Consulta — DIC",
+        description=(
+            "Abra um ticket provisório para consultar nomes, RGs, facções, mesas, procurados e arquivos.\n\n"
+            "🔎 **Abrir Ticket de Consulta** — Cria um canal privado temporário para a consulta.\n\n"
+            "Após finalizar, clique em **🔒 Fechar Ticket** para apagar o canal."
+        ),
+        color=0x2B2D31
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=PainelConsultaView()
+    )
+
+    await enviar_log(
+        "Painel de Consulta Criado",
         f"👤 Criado por: {interaction.user.mention}\n"
         f"📍 Canal: {interaction.channel.mention}"
     )
@@ -1973,6 +2243,57 @@ async def paineladmin(interaction: discord.Interaction):
         f"👤 Criado por: {interaction.user.mention}\n"
         f"📍 Canal: {interaction.channel.mention}"
     )
+
+
+# =========================
+# EVENTOS
+# =========================
+
+@bot.event
+async def on_ready():
+    global views_adicionadas
+
+    await tree.sync()
+
+    if not backup_diario.is_running():
+        backup_diario.start()
+
+    if not views_adicionadas:
+        bot.add_view(CriarMesaView())
+        bot.add_view(PainelProcuradosView())
+        bot.add_view(FecharMesaView())
+        bot.add_view(PainelAdminView())
+        bot.add_view(PainelConsultaView())
+        bot.add_view(FecharConsultaView())
+        views_adicionadas = True
+
+    print(f"Bot online como {bot.user}")
+    print("Comandos sincronizados!")
+    print("Backup diário ativado!")
+
+
+@tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    try:
+        await enviar_log(
+            "Erro no Bot",
+            f"👤 Usuário: {interaction.user.mention if interaction.user else 'N/A'}\n"
+            f"⚠️ Erro: `{error}`"
+        )
+
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "❌ Ocorreu um erro ao executar esse comando.",
+                ephemeral=True
+            )
+        else:
+            await interaction.response.send_message(
+                "❌ Ocorreu um erro ao executar esse comando.",
+                ephemeral=True
+            )
+
+    except Exception:
+        pass
 
 
 bot.run(TOKEN)
