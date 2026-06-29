@@ -13,7 +13,6 @@ from zoneinfo import ZoneInfo
 
 
 TOKEN = os.getenv("TOKEN")
-
 # =========================
 # IDS
 # =========================
